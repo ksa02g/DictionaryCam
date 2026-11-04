@@ -377,7 +377,7 @@
 <script>
 'use strict';
 
-const VERSION = '2026-11-04b';
+const VERSION = '2026-11-04c';
 
 /* ===== 外部ライブラリ =====
  * 文字の読み取り（OCR）は Tesseract.js、単語の区切りと読みがなは kuromoji.js。
@@ -1004,7 +1004,7 @@ function cleanText(t, vert) {
 /* ===== 単語の区切りと読みがな（kuromoji.js） =====
  * 辞書は約 17MB。展開に数秒かかり、表でやると画面が固まるので、Worker の中で読み込んで区切る。
  * 読めないときは Intl.Segmenter で区切るだけにする（読みがななし）。
- * tokenize(text) → [[表記, 品詞, 基本形, 読み], …]
+ * tokenize(text) → [[表記, 品詞, 品詞細分類1, 基本形, 読み, 位置（0から）], …]
  */
 let tokenizerP = null;
 function getTokenizer() {
@@ -1013,7 +1013,7 @@ function getTokenizer() {
 kuromoji.builder({ dicPath: ${JSON.stringify(LIB.kuromojiDict)} }).build((err, tk) => {
   if (err) { postMessage({ error: String((err && err.message) || err) }); return; }
   onmessage = e => postMessage({ id: e.data.id,
-    tokens: tk.tokenize(e.data.text).map(t => [t.surface_form, t.pos, t.basic_form, t.reading]) });
+    tokens: tk.tokenize(e.data.text).map(t => [t.surface_form, t.pos, t.pos_detail_1, t.basic_form, t.reading, t.word_position - 1]) });
   postMessage({ ready: true });
 });`;
     const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
@@ -1053,13 +1053,51 @@ kuromoji.builder({ dicPath: ${JSON.stringify(LIB.kuromojiDict)} }).build((err, t
   });
 }
 
-async function toTokens(text) {
+/* kuromoji（IPA 辞書）は「所謂」→「所／謂」、「卓越せる」→「卓／越せる」のように、漢字の熟語を分けすぎることがある。
+ * ブラウザ内蔵の区切り（Intl.Segmenter）は熟語に強い（活用する語には弱い）ので、それが漢字だけの1語とした所を1つにまとめる。
+ * 語の終わりが kuromoji の語の途中なら、残りのかな（「せる」）を別の語にする。
+ * 数や接頭詞を含む所（第二）はまとめない（もとの区切りのほうが読みがなが正しい）。
+ */
+const HAN_WORD = /^[\p{Script=Han}々〆ヶ]{2,}$/u;
+async function joinCompounds(seg, toks, tk) {
+  if (!window.Intl?.Segmenter) return toks;
+  const out = [];
+  let i = 0;
+  for (const w of new Intl.Segmenter('ja', { granularity: 'word' }).segment(seg)) {
+    if (!HAN_WORD.test(w.segment)) continue;
+    const end = w.index + w.segment.length;
+    while (i < toks.length && toks[i].at < w.index) out.push(toks[i++]);
+    if (toks[i]?.at !== w.index) continue;                 // 語の頭がずれている
+    let j = i;
+    while (j < toks.length && toks[j].at + toks[j].s.length <= end) j++;
+    const next = toks[j], cut = next && next.at < end ? end - next.at : 0;
+    const rest = cut ? next.s.slice(cut) : '';
+    if (cut && !/^\p{Script=Hiragana}+$/u.test(rest)) continue;
+    const parts = toks.slice(i, cut ? j + 1 : j);
+    if (parts.length < 2 || parts.some(t => t.detail === '数' || t.pos === '接頭詞')) continue;
+    // 読み: 熟語だけで区切りなおして1語になればその読み。2字以上の名詞と接尾語だけなら（研究＋室）読みをつなぐ。
+    // それ以外（1字ずつの 所＋謂 →「ところいい」）は読みがなを付けない
+    const one = await tk.tokenize(w.segment);
+    const nouns = !cut && parts.every(t => t.pos === '名詞' && (t.s.length >= 2 || t.detail === '接尾')
+      && !['非自立', '固有名詞'].includes(t.detail) && t.reading && t.reading !== '*');
+    const reading = one.length === 1 ? one[0][4] : nouns ? parts.map(t => t.reading).join('') : '';
+    out.push({ s: w.segment, pos: '名詞', base: w.segment, reading, at: w.index });
+    if (cut) toks[j] = { s: rest, pos: next.pos, detail: '', base: rest, reading: '', at: end };
+    i = j;
+  }
+  return out.concat(toks.slice(i));
+}
+
+// join: kuromoji が分けすぎた漢字の熟語を1語にまとめる
+async function toTokens(text, { join = true } = {}) {
   const tk = await getTokenizer().catch(e => { log(`区切り: ${e.message}`); return null; });
   const out = [];
   const pushJa = async seg => {
     if (!seg.trim()) return;
     if (tk) {
-      for (const [s, pos, base, reading] of await tk.tokenize(seg)) {
+      let toks = (await tk.tokenize(seg)).map(([s, pos, detail, base, reading, at]) => ({ s, pos, detail, base, reading, at }));
+      if (join) toks = await joinCompounds(seg, toks, tk);
+      for (const { s, pos, base, reading } of toks) {
         if (pos === '記号' || /^[\p{P}\p{S}\s]+$/u.test(s)) continue;
         const r = KANJI.test(s) && reading && reading !== '*' ? kataToHira(reading) : '';
         out.push({ s, b: base && base !== '*' ? base : s, r });
@@ -1083,13 +1121,15 @@ async function toTokens(text) {
   return out;
 }
 
+// 読みは、kuromoji がそのことばを1語として知っているときだけ出す
+// （「所謂」を「所＋謂」に分けて「ところいい」とするような、つなぎ合わせの読みは出さない。国語では辞書の読みを使う）
 async function readingOf(word) {
   if (!KANJI.test(word)) return '';
   const tk = await getTokenizer().catch(() => null);
   if (!tk) return '';
   const ts = await tk.tokenize(word);
-  if (!ts.length || ts.some(t => !t[3] || t[3] === '*')) return '';
-  return kataToHira(ts.map(t => t[3]).join(''));
+  if (ts.length !== 1 || !ts[0][4] || ts[0][4] === '*') return '';
+  return kataToHira(ts[0][4]);
 }
 
 /* ===== 撮って読み取る ===== */
@@ -1279,7 +1319,9 @@ function wiktParse(html) {
       } else if (el.tagName === 'OL' && !el.classList.contains('references') && !SKIP_HEAD.test(head)) {
         const defs = [...el.children].filter(li => li.tagName === 'LI').map(liToDef).filter(Boolean);
         if (defs.length) {
-          L.blocks.push({ head, defs, hw: lastP ? { text: txt(lastP), reading: txt(lastP.querySelector('.headword-tr')) } : null });
+          // 読みが2つ以上ある見出し（所謂 (しょい 又は いわゆる)）は全部並べる
+          const reading = lastP ? [...lastP.querySelectorAll('.headword-tr')].map(txt).filter(Boolean).join('・') : '';
+          L.blocks.push({ head, defs, hw: lastP ? { text: txt(lastP), reading } : null });
         }
         lastP = null;
       }
@@ -1536,7 +1578,7 @@ async function openWord(word, opts = {}) {
     S.cur.r = R.reading;
     renderHeader();
   }
-  if (!R.parts.length) R.split = (await toTokens(word)).filter(t => t.b !== word);
+  if (!R.parts.length) R.split = (await toTokens(word, { join: false })).filter(t => t.b !== word);
   if (seq !== S.seq) return;
   S.cur.s = snippetOf(R);
   renderResult(R);
