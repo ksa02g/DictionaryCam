@@ -85,6 +85,8 @@
              background:rgba(0,0,0,.6); color:#fff; font-size:13px; font-weight:700; pointer-events:none;
              opacity:0; transition:opacity .25s}
   #zoomBadge.show{opacity:1}
+  #camStatus{position:absolute; left:50%; bottom:116px; transform:translateX(-50%); max-width:90%; padding:4px 12px; border-radius:99px;
+             background:rgba(0,0,0,.6); color:#fff; font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; pointer-events:none}
   #camMsg{position:absolute; left:20px; right:20px; top:30%; padding:18px; border-radius:16px; text-align:center;
           background:rgba(20,22,26,.85); color:#fff; font-size:15px}
   #camMsg .row{display:flex; gap:8px; justify-content:center; margin-top:12px}
@@ -231,6 +233,8 @@
   .btn{height:44px; padding:0 12px; border-radius:22px; background:var(--soft); font-weight:700}
   .btn.primary{grid-column:1 / -1; order:-1; background:var(--accent); color:var(--accent-ink)}
 
+  #debugLog{position:fixed; left:4px; right:4px; top:calc(4px + env(safe-area-inset-top)); z-index:30; max-height:38vh; overflow:auto;
+            padding:6px 8px; border-radius:8px; background:rgba(0,0,0,.8); color:#a6f3a6; font:11px/1.4 ui-monospace,Menlo,monospace; white-space:pre-wrap}
   #toast{position:fixed; left:50%; bottom:calc(96px + env(safe-area-inset-bottom)); z-index:20; transform:translateX(-50%);
          max-width:86vw; padding:10px 16px; border-radius:12px; background:rgba(20,22,26,.9); color:#fff; font-size:14px; text-align:center}
 </style>
@@ -275,6 +279,7 @@
         <button id="btnBack" class="pillbtn" hidden><svg class="ic"><use href="#i-back"/></svg>カメラ</button>
         <button id="btnDir" class="pillbtn" aria-label="縦書き・横書きの切り替え"><svg class="ic"><use href="#i-dir"/></svg><span id="dirLabel">縦書き</span></button>
         <div id="zoomBadge"></div>
+        <div id="camStatus" hidden></div>
         <div id="camMsg" hidden>
           <p id="camMsgText"></p>
           <div class="row"><button id="camRetry">もう一度</button><button id="camPhoto">写真を選ぶ</button></div>
@@ -367,9 +372,12 @@
 
 <input type="file" id="file" accept="image/*" hidden>
 <div id="toast" hidden></div>
+<div id="debugLog" hidden></div>
 
 <script>
 'use strict';
+
+const VERSION = '2026-11-04b';
 
 /* ===== 外部ライブラリ =====
  * 文字の読み取り（OCR）は Tesseract.js、単語の区切りと読みがなは kuromoji.js。
@@ -442,6 +450,37 @@ function toast(msg) {
   toastTimer = setTimeout(() => { t.hidden = true; }, 2200);
 }
 
+/* ===== 動作の記録 =====
+ * …/?debug で開くと、画面の上に記録を出す（実機で動かないときの調べ用。タップでコピー）。
+ * 予期しないエラーは、いつも画面の下に短く出す。
+ */
+const DEBUG = /(^|[?&])debug\b/.test(location.search);
+const LOGS = [];
+const sec = t0 => `${((performance.now() - t0) / 1000).toFixed(1)}秒`;
+function log(msg) {
+  LOGS.push(`${(performance.now() / 1000).toFixed(1)} ${msg}`);
+  if (LOGS.length > 300) LOGS.shift();
+  if (!DEBUG) return;
+  const el = $('debugLog');
+  el.hidden = false;
+  el.textContent = LOGS.join('\n');
+  el.scrollTop = el.scrollHeight;
+}
+window.addEventListener('error', e => {
+  log(`エラー: ${e.message} (${String(e.filename || '').split('/').pop()}:${e.lineno})`);
+  toast(`エラー: ${e.message}`);
+});
+window.addEventListener('unhandledrejection', e => log(`エラー: ${e.reason?.message || e.reason}`));
+if (DEBUG) {
+  // 画面が止まっていた時間も記録する（重い処理が表で動いていないか）
+  let last = performance.now();
+  setInterval(() => {
+    const now = performance.now();
+    if (now - last > 1500) log(`画面が ${((now - last) / 1000).toFixed(1)} 秒止まっていた`);
+    last = now;
+  }, 500);
+}
+
 /* ===== 画面 ===== */
 const S = {
   view: '',
@@ -451,6 +490,8 @@ const S = {
   seq: 0,            // 調べるたびに増やす（遅れて届いた古い結果を捨てる）
   shot: 0,           // 撮るたびに増やす（閉じたあとに届いた読み取り結果を捨てる）
   histTab: 'hist',
+  preloaded: false,  // 読み取りと区切りの辞書を読み込みはじめたか
+  libsLoading: false,
 };
 
 function show(view) {
@@ -480,7 +521,7 @@ function setDict(d) {
   updateDir();
   if (!changed) return;
   if (S.view === 'dict' && S.cur) openWord(S.cur.w, { r: S.cur.r });
-  if (S.view === 'scan') OCR.preload();
+  if (S.view === 'scan' && S.preloaded) OCR.preload();
 }
 
 /* ===== カメラ =====
@@ -504,21 +545,23 @@ const Cam = {
       return;
     }
     this.starting = true;
+    renderStatus();
+    log('カメラ: 起動');
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: false,
         video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
       });
+      log(`カメラ: 許可された（${stream.getVideoTracks()[0]?.label || '名前なし'}）`);
       // 許可を待つあいだに別の画面へ移っていたら、すぐ止める
       if (S.view !== 'scan' || document.hidden || this.mode !== 'video' || this.frozen) {
+        log('カメラ: 画面が変わっていたので止める');
         stream.getTracks().forEach(t => t.stop());
         return;
       }
       this.stream = stream;
       this.track = stream.getVideoTracks()[0];
-      const video = $('video');
-      video.srcObject = stream;
-      await video.play().catch(() => {});
+      $('video').srcObject = stream;
       const caps = this.track.getCapabilities?.() || {};
       this.hw = caps.zoom && caps.zoom.max > caps.zoom.min
         ? { min: caps.zoom.min, max: Math.min(caps.zoom.max, caps.zoom.min * 8), value: this.track.getSettings?.().zoom || caps.zoom.min }
@@ -528,13 +571,40 @@ const Cam = {
       this.torch = false;
       $('btnTorch').classList.remove('on');
       applyView();
-      camMessage('');
+      await this.play();
     } catch (e) {
+      log(`カメラ: ${e.name} ${e.message}`);
       camMessage(e.name === 'NotAllowedError'
         ? 'カメラの使用が許可されていません。設定でカメラを許可するか、写真から読み取ってください。'
         : 'カメラを起動できませんでした。写真から読み取ることもできます。');
+      setTimeout(preloadAll, 300);
     } finally {
       this.starting = false;
+      renderStatus();
+    }
+  },
+
+  // 映像を流しはじめ、実際に絵が届くまで待つ。省電力モードなどで自動再生が止められたら、タップしてもらう
+  async play() {
+    const video = $('video'), stream = this.stream;
+    if (!stream) return;
+    camMessage('');
+    try {
+      await video.play();
+    } catch (e) {
+      if (this.stream !== stream) return;      // 途中でカメラを止めた
+      log(`カメラ: 再生が止められた（${e.name}）`);
+      camMessage('下のボタンを押すと、カメラの映像が映ります。', 'カメラを映す');
+      return;
+    }
+    for (let i = 0; i < 30 && !(video.readyState >= 2 && video.videoWidth); i++) await new Promise(r => setTimeout(r, 200));
+    if (this.stream !== stream) return;
+    if (video.readyState >= 2 && video.videoWidth) {
+      log(`カメラ: 映像 ${video.videoWidth}×${video.videoHeight}`);
+      setTimeout(preloadAll, 300);
+    } else {
+      log(`カメラ: 映像が届かない（readyState ${video.readyState}）`);
+      camMessage('カメラの映像が届きません。', 'もう一度');
     }
   },
 
@@ -646,9 +716,37 @@ function applyView() {
   $('still').style.transform = t;
 }
 
-function camMessage(msg) {
+function camMessage(msg, retry = 'もう一度') {
   $('camMsg').hidden = !msg;
   $('camMsgText').textContent = msg;
+  $('camRetry').textContent = retry;
+  renderStatus();
+}
+
+// カメラの下に出す、いま何をしているかの短い表示
+function renderStatus() {
+  const msg = Cam.starting && Cam.mode === 'video' ? 'カメラを起動中…'
+    : S.libsLoading ? '文字を読む準備中…（初回のみ・約25MB）' : '';
+  $('camStatus').textContent = msg;
+  $('camStatus').hidden = !msg || !$('camMsg').hidden || !$('sheet').hidden;
+}
+
+// 読み取りと区切りの辞書を裏で読み込んでおく（初回の待ち時間を減らす）。カメラが映ってから始める
+function preloadAll() {
+  if (S.preloaded) return;
+  S.preloaded = true;
+  S.libsLoading = true;
+  renderStatus();
+  const t0 = performance.now();
+  log('準備: 文字の読み取りと区切りの辞書を読み込む');
+  Promise.allSettled([
+    getTokenizer().then(() => log(`準備: 区切りの辞書 OK（${sec(t0)}）`)),
+    OCR.get(OCR.langsFor(SET.vert[SET.dict], SET.dict)).then(() => log(`準備: 文字の読み取り OK（${sec(t0)}）`)),
+  ]).then(rs => {
+    rs.filter(r => r.status === 'rejected').forEach(r => log(`準備: 失敗 ${r.reason?.message || r.reason}`));
+    S.libsLoading = false;
+    renderStatus();
+  });
 }
 
 // 写真は指で動かす・2本指で拡大縮小する
@@ -850,9 +948,14 @@ const OCR = {
         this.langs = '';
         old.terminate().catch(() => {});
       }
+      log(`読み取り: ${langs} を準備`);
+      let status = '';
       const w = await Tesseract.createWorker(langs, 1, {
-        logger: m => this.onProgress?.(m),
-        errorHandler: e => console.warn(e),
+        logger: m => {
+          this.onProgress?.(m);
+          if (m.status !== status) log(`読み取り: ${status = m.status}`);
+        },
+        errorHandler: e => log(`読み取り: エラー ${e?.message || e}`),
       });
       this.worker = w;
       this.langs = langs;
@@ -899,31 +1002,67 @@ function cleanText(t, vert) {
 }
 
 /* ===== 単語の区切りと読みがな（kuromoji.js） =====
- * 辞書は約 17MB。起動したら裏で読み込んでおく。読めないときは Intl.Segmenter で区切るだけにする（読みがななし）。
+ * 辞書は約 17MB。展開に数秒かかり、表でやると画面が固まるので、Worker の中で読み込んで区切る。
+ * 読めないときは Intl.Segmenter で区切るだけにする（読みがななし）。
+ * tokenize(text) → [[表記, 品詞, 基本形, 読み], …]
  */
 let tokenizerP = null;
 function getTokenizer() {
-  return tokenizerP ||= loadScript(LIB.kuromoji)
-    .then(() => new Promise((resolve, reject) => {
-      kuromoji.builder({ dicPath: LIB.kuromojiDict }).build((err, t) => (err ? reject(err) : resolve(t)));
-    }))
-    .catch(e => {
+  return tokenizerP ||= new Promise((resolve, reject) => {
+    const src = `importScripts(${JSON.stringify(LIB.kuromoji)});
+kuromoji.builder({ dicPath: ${JSON.stringify(LIB.kuromojiDict)} }).build((err, tk) => {
+  if (err) { postMessage({ error: String((err && err.message) || err) }); return; }
+  onmessage = e => postMessage({ id: e.data.id,
+    tokens: tk.tokenize(e.data.text).map(t => [t.surface_form, t.pos, t.basic_form, t.reading]) });
+  postMessage({ ready: true });
+});`;
+    const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+    const worker = new Worker(url);
+    const waiting = new Map();
+    let seq = 0;
+    const fail = err => {
+      worker.terminate();
+      URL.revokeObjectURL(url);
+      waiting.forEach(done => done([]));
+      waiting.clear();
       tokenizerP = null;
-      throw e;
-    });
+      reject(err);
+    };
+    worker.onmessage = e => {
+      const d = e.data;
+      if (d.ready) {
+        URL.revokeObjectURL(url);
+        resolve({
+          tokenize: text => new Promise(done => {
+            const id = ++seq;
+            waiting.set(id, done);
+            worker.postMessage({ id, text });
+          }),
+        });
+      } else if (d.error) {
+        fail(new Error(d.error));
+      } else if (waiting.has(d.id)) {
+        waiting.get(d.id)(d.tokens);
+        waiting.delete(d.id);
+      }
+    };
+    worker.onerror = e => {
+      e.preventDefault();
+      fail(new Error(e.message || '区切りの辞書を読み込めませんでした'));
+    };
+  });
 }
 
 async function toTokens(text) {
-  const tk = await getTokenizer().catch(e => { console.warn(e); return null; });
+  const tk = await getTokenizer().catch(e => { log(`区切り: ${e.message}`); return null; });
   const out = [];
-  const pushJa = seg => {
+  const pushJa = async seg => {
     if (!seg.trim()) return;
     if (tk) {
-      for (const t of tk.tokenize(seg)) {
-        const s = t.surface_form;
-        if (t.pos === '記号' || /^[\p{P}\p{S}\s]+$/u.test(s)) continue;
-        const reading = KANJI.test(s) && t.reading && t.reading !== '*' ? kataToHira(t.reading) : '';
-        out.push({ s, b: t.basic_form && t.basic_form !== '*' ? t.basic_form : s, r: reading });
+      for (const [s, pos, base, reading] of await tk.tokenize(seg)) {
+        if (pos === '記号' || /^[\p{P}\p{S}\s]+$/u.test(s)) continue;
+        const r = KANJI.test(s) && reading && reading !== '*' ? kataToHira(reading) : '';
+        out.push({ s, b: base && base !== '*' ? base : s, r });
       }
     } else if (window.Intl?.Segmenter) {
       for (const x of new Intl.Segmenter('ja', { granularity: 'word' }).segment(seg)) {
@@ -936,11 +1075,11 @@ async function toTokens(text) {
   // 英字の語はそのまま1語にし、それ以外を kuromoji で区切る
   let last = 0;
   for (const m of text.matchAll(/[A-Za-z](?:[A-Za-z'’-]*[A-Za-z])?/g)) {
-    pushJa(text.slice(last, m.index));
+    await pushJa(text.slice(last, m.index));
     out.push({ s: m[0], b: m[0], r: '' });
     last = m.index + m[0].length;
   }
-  pushJa(text.slice(last));
+  await pushJa(text.slice(last));
   return out;
 }
 
@@ -948,9 +1087,9 @@ async function readingOf(word) {
   if (!KANJI.test(word)) return '';
   const tk = await getTokenizer().catch(() => null);
   if (!tk) return '';
-  const ts = tk.tokenize(word);
-  if (!ts.length || ts.some(t => !t.reading || t.reading === '*')) return '';
-  return kataToHira(ts.map(t => t.reading).join(''));
+  const ts = await tk.tokenize(word);
+  if (!ts.length || ts.some(t => !t[3] || t[3] === '*')) return '';
+  return kataToHira(ts.map(t => t[3]).join(''));
 }
 
 /* ===== 撮って読み取る ===== */
@@ -968,6 +1107,8 @@ async function shoot() {
   }
   if (Cam.mode === 'video') Cam.freeze();
   const shot = ++S.shot;
+  log(`撮影: ${crop.width}×${crop.height}（${vert ? '縦' : '横'}・${SET.dict}）`);
+  const t0 = performance.now();
   openSheet();
   sheetStatus('読み取り中…', 0);
   OCR.onProgress = m => {
@@ -980,6 +1121,7 @@ async function shoot() {
     const data = await OCR.read(crop, vert, SET.dict);
     if (shot !== S.shot) return;
     const text = cleanText(data.text || '', vert);
+    log(`撮影: 「${text}」 確信度 ${Math.round(data.confidence ?? 0)}（${sec(t0)}）`);
     sheetStatus('ことばに区切っています…', null);
     await setText(text);
     if (shot !== S.shot) return;
@@ -987,7 +1129,7 @@ async function shoot() {
       sheetStatus(`読み取れませんでした。${vert ? '縦' : '横'}の1行が点線のあいだに収まるように、ズームで大きさを合わせて撮ってください。「編集」で入力もできます。`, undefined);
     }
   } catch (e) {
-    console.warn(e);
+    log(`撮影: 失敗 ${e?.message || e}`);
     if (shot !== S.shot) return;
     sheetStatus('読み取りの準備ができませんでした。電波のよい所で、もう一度撮ってください。', undefined);
   }
@@ -1006,12 +1148,14 @@ function openSheet() {
   $('chips').hidden = true;
   $('raw').hidden = true;
   renderKanjiSeg();
+  renderStatus();
 }
 // restart: 閉じたらカメラを動かしなおす
 function closeSheet(restart = true) {
   S.shot++;
   $('sheet').hidden = true;
   $('controls').hidden = false;
+  renderStatus();
   if (Cam.mode === 'video') {
     Cam.unfreeze();
     if (restart && S.view === 'scan') Cam.start();
@@ -1382,7 +1526,7 @@ async function openWord(word, opts = {}) {
   try {
     R = await LOOKUP[SET.dict](word);
   } catch (e) {
-    console.warn(e);
+    log(`辞書: 失敗 ${e?.message || e}`);
     if (seq !== S.seq) return;
     body.innerHTML = `<div class="empty err"><h2>調べられませんでした</h2><p>通信できませんでした。電波のよい所で、もう一度お試しください。</p><button data-retry>もう一度</button></div>`;
     return;
@@ -1592,12 +1736,23 @@ function init() {
     SET.vert[SET.dict] = !SET.vert[SET.dict];
     saveSet();
     updateDir();
-    OCR.preload();
+    if (S.preloaded) OCR.preload();
   });
   const pickPhoto = () => $('file').click();
   $('btnPhoto').addEventListener('click', pickPhoto);
   $('camPhoto').addEventListener('click', pickPhoto);
-  $('camRetry').addEventListener('click', () => Cam.start());
+  // 自動再生が止められたときは、このタップで映像を流す。それ以外はカメラを起動しなおす
+  $('camRetry').addEventListener('click', () => {
+    if (Cam.stream && $('video').paused) {
+      Cam.play();
+    } else {
+      Cam.stop();
+      Cam.start();
+    }
+  });
+  $('debugLog').addEventListener('click', () => {
+    navigator.clipboard?.writeText(LOGS.join('\n')).then(() => toast('記録をコピーしました'), () => {});
+  });
   $('btnBack').addEventListener('click', () => Cam.backToCamera());
   $('file').addEventListener('change', e => {
     const f = e.target.files?.[0];
@@ -1675,6 +1830,7 @@ function init() {
     else if (S.view === 'scan' && $('sheet').hidden) Cam.start();
   });
 
+  log(`起動 ${VERSION}${navigator.standalone ? '（ホーム画面）' : ''} ${navigator.userAgent}`);
   setDict(SET.dict);
   renderFont();
   renderKanjiSeg();
@@ -1689,11 +1845,8 @@ function init() {
     show('scan');     // カメラも動かしはじめる
   }
 
-  // 初回の待ち時間を減らすため、読み取りと区切りの辞書を裏で読み込んでおく
-  setTimeout(() => {
-    getTokenizer().catch(() => {});
-    if (S.view === 'scan') OCR.preload();
-  }, 800);
+  // ふつうはカメラが映ってから辞書を読み込みはじめる。カメラの許可を待っているあいだなども、しばらくしたら始める
+  setTimeout(preloadAll, 8000);
 }
 
 init();
