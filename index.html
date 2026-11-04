@@ -1,0 +1,1702 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f4f6f9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111418" media="(prefers-color-scheme: dark)">
+<meta name="description" content="本や紙の文字をカメラで撮って、そのまま国語辞典・英和辞典・Wikipedia で調べる辞書アプリ。">
+<!-- ホーム画面に追加すると、アドレスバーのない全画面で動きます -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="カメラ辞書">
+<meta name="format-detection" content="telephone=no">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.json">
+<title>カメラ辞書</title>
+<style>
+  :root{
+    color-scheme:light dark;
+    --bg:#f4f6f9; --card:#ffffff; --ink:#151a21; --sub:#5b6573; --faint:#8b94a1;
+    --line:#dde2e9; --soft:#e8ecf1;
+    --accent:#2a7bd4; --accent-ink:#ffffff; --accent-soft:#e1edfa; --link:#1f6fc5;
+    --arrow:#ee3a2c;
+    --shadow:0 1px 2px rgba(20,30,50,.06), 0 6px 18px rgba(20,30,50,.08);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#111418; --card:#1a1f26; --ink:#e6eaf0; --sub:#9aa4b2; --faint:#6e7886;
+      --line:#2b323c; --soft:#232a33;
+      --accent:#5aa2ec; --accent-ink:#06182c; --accent-soft:#1b2d42; --link:#7ab6f3;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 6px 18px rgba(0,0,0,.3);
+    }
+  }
+  *{box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent}
+  html, body{height:100%}
+  html{-webkit-text-size-adjust:100%; text-size-adjust:100%}
+  body{
+    background:var(--bg); color:var(--ink); overflow:hidden; overscroll-behavior:none;
+    font-family:system-ui,-apple-system,"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo","Noto Sans JP",sans-serif;
+    font-size:16px; line-height:1.5;
+  }
+  button{font:inherit; color:inherit; background:none; border:0; cursor:pointer;
+         touch-action:manipulation; -webkit-user-select:none; user-select:none}
+  button:focus-visible, a:focus-visible{outline:3px solid var(--accent); outline-offset:2px}
+  svg{display:block}
+  .ic{width:24px; height:24px; flex:none; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round}
+  [hidden]{display:none !important}
+
+  #app{display:flex; flex-direction:column; height:100%; height:100dvh; max-width:640px; margin:0 auto}
+
+  /* ---- 上: 辞書の切り替え ---- */
+  #top{flex:none; padding:calc(8px + env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 8px max(12px, env(safe-area-inset-left))}
+  .seg{display:grid; grid-auto-flow:column; grid-auto-columns:1fr; gap:3px; padding:3px; border-radius:999px; background:var(--soft)}
+  .seg button{height:40px; border-radius:999px; font-size:15px; font-weight:700; color:var(--sub); white-space:nowrap}
+  .seg button.on{background:var(--accent); color:var(--accent-ink)}
+  .seg.small{display:inline-grid}
+  .seg.small button{height:32px; padding:0 12px; font-size:13px; font-weight:600}
+  .seg.small button.on{background:var(--card); color:var(--ink); box-shadow:var(--shadow)}
+
+  #main{flex:1; min-height:0; position:relative}
+  .view{position:absolute; inset:0; display:flex; flex-direction:column}
+
+  /* ---- スキャン ---- */
+  .hint{flex:none; padding:0 12px 8px; text-align:center; font-size:14px; color:var(--sub)}
+  #cam{flex:1; min-height:0; position:relative; overflow:hidden; background:#2b2e33; touch-action:none}
+  .media{position:absolute; inset:0; width:100%; height:100%; object-fit:cover; transform-origin:50% 50%}
+  #frame{position:absolute; border-radius:12px; background:rgba(255,255,255,.1);
+         box-shadow:0 0 0 200vmax rgba(0,0,0,.45); pointer-events:none}
+  #band{position:absolute; pointer-events:none}
+  #frame.v #band{border-left:2px dashed rgba(120,120,120,.95); border-right:2px dashed rgba(120,120,120,.95)}
+  #frame.h #band{border-top:2px dashed rgba(120,120,120,.95); border-bottom:2px dashed rgba(120,120,120,.95)}
+  #arrow{position:absolute; width:0; height:0; pointer-events:none; filter:drop-shadow(0 1px 2px rgba(0,0,0,.35))}
+  #arrow.v{border-left:13px solid transparent; border-right:13px solid transparent; border-top:20px solid var(--arrow)}
+  #arrow.h{border-top:13px solid transparent; border-bottom:13px solid transparent; border-left:20px solid var(--arrow)}
+
+  .pillbtn{position:absolute; top:12px; height:44px; padding:0 14px; display:flex; align-items:center; gap:6px;
+           border-radius:22px; background:rgba(255,255,255,.95); color:#1b1f24; font-size:15px; font-weight:700;
+           box-shadow:0 2px 8px rgba(0,0,0,.25)}
+  .pillbtn:active{transform:scale(.96)}
+  #btnDir{right:12px}
+  #btnBack{left:12px}
+  #zoomBadge{position:absolute; top:20px; left:50%; transform:translateX(-50%); padding:2px 10px; border-radius:99px;
+             background:rgba(0,0,0,.6); color:#fff; font-size:13px; font-weight:700; pointer-events:none;
+             opacity:0; transition:opacity .25s}
+  #zoomBadge.show{opacity:1}
+  #camMsg{position:absolute; left:20px; right:20px; top:30%; padding:18px; border-radius:16px; text-align:center;
+          background:rgba(20,22,26,.85); color:#fff; font-size:15px}
+  #camMsg .row{display:flex; gap:8px; justify-content:center; margin-top:12px}
+  #camMsg button{height:40px; padding:0 16px; border-radius:20px; background:#fff; color:#1b1f24; font-weight:700}
+
+  #controls{position:absolute; left:0; right:0; bottom:18px; display:flex; justify-content:center; align-items:center; gap:14px}
+  .rbtn{width:54px; height:54px; flex:none; display:grid; place-items:center; border-radius:50%;
+        background:rgba(255,255,255,.95); color:#1b1f24; box-shadow:0 2px 8px rgba(0,0,0,.25)}
+  .rbtn:active{transform:scale(.93)}
+  .rbtn.on{background:#ffd54a}
+  .rbtn.ghost{visibility:hidden}
+  #shutter{width:80px; height:80px; flex:none; border-radius:50%; background:var(--accent);
+           border:5px solid rgba(255,255,255,.92); box-shadow:0 0 0 3px var(--accent), 0 4px 14px rgba(0,0,0,.3)}
+  #shutter:active{transform:scale(.94)}
+
+  /* 撮ったあとのシート */
+  #sheet{position:absolute; left:8px; right:8px; bottom:8px; max-height:64%; display:flex; flex-direction:column;
+         padding:14px 16px 8px; border-radius:24px; background:var(--card); box-shadow:0 -4px 24px rgba(0,0,0,.28);
+         animation:up .2s ease-out}
+  @keyframes up{from{transform:translateY(24px); opacity:0}}
+  .sheet-head{flex:none; display:flex; align-items:center; gap:8px}
+  .sheet-title{flex:1; display:flex; align-items:center; gap:6px; font-size:17px; font-weight:800}
+  #raw{flex:none; display:block; width:100%; margin-top:8px; padding:6px 10px; border-radius:10px; text-align:left;
+       background:var(--soft); color:var(--sub); font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  #chips{flex:1; min-height:0; overflow:auto; padding:12px 0 6px; display:flex; flex-wrap:wrap; gap:8px; align-content:flex-start}
+  .chip{display:flex; flex-direction:column; align-items:center; justify-content:flex-end; min-width:46px; padding:4px 10px 6px;
+        border-radius:12px; background:var(--soft); color:var(--link); line-height:1.15}
+  .chip:active{background:var(--accent-soft)}
+  .chip .r{min-height:14px; font-size:11px; font-weight:600; opacity:.9}
+  .chip .b{font-size:22px; font-weight:700}
+  .sheet-msg{padding:20px 4px; color:var(--sub); font-size:15px}
+  .sheet-msg .bar{height:4px; margin-top:12px; border-radius:2px; background:var(--soft); overflow:hidden}
+  .sheet-msg .bar i{display:block; height:100%; width:0; background:var(--accent); transition:width .2s}
+  .sheet-foot{flex:none; display:flex; align-items:center; justify-content:space-between; padding-top:6px}
+  .tbtn{height:44px; padding:0 14px; display:flex; align-items:center; gap:6px; border-radius:22px; font-weight:700; color:var(--sub)}
+  .tbtn.line{border:1.5px solid var(--accent); color:var(--accent)}
+  .tbtn:active{background:var(--soft)}
+
+  .spin{display:inline-block; width:16px; height:16px; margin-right:8px; vertical-align:-3px; border-radius:50%;
+        border:2.5px solid var(--line); border-top-color:var(--accent); animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* ---- 辞書 ---- */
+  .dhead{flex:none; padding:0 max(12px, env(safe-area-inset-right)) 8px max(16px, env(safe-area-inset-left)); border-bottom:1px solid var(--line)}
+  .dtitle{display:flex; align-items:center; gap:2px; min-height:48px}
+  .dword{flex:1; min-width:0; display:flex; align-items:baseline; gap:10px; overflow:hidden}
+  #dWord{font-size:24px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  #dReading{font-size:15px; font-weight:600; color:var(--sub); white-space:nowrap}
+  .ibtn{width:44px; height:44px; flex:none; display:grid; place-items:center; border-radius:12px}
+  .ibtn:active{background:var(--soft)}
+  .ibtn.on{color:var(--accent)}
+  .ibtn.on .ic{fill:currentColor}
+  .fsrow{display:flex; align-items:center; justify-content:flex-end; gap:8px; font-size:13px; color:var(--sub)}
+  #dBody{flex:1; min-height:0; overflow:auto; padding:16px max(18px, env(safe-area-inset-right)) 28px max(18px, env(safe-area-inset-left)); -webkit-overflow-scrolling:touch}
+  #dBody.fs0{font-size:15px} #dBody.fs1{font-size:17px} #dBody.fs2{font-size:20px} #dBody.fs3{font-size:24px}
+  .loading{color:var(--sub); font-size:15px}
+  .blk{margin-bottom:1.3em}
+  .pos{display:inline-block; padding:0 .45em; border-radius:6px; background:var(--ink); color:var(--bg); font-size:.78em; font-weight:700; line-height:1.6}
+  .hw{margin-left:.6em; color:var(--sub); font-size:.85em}
+  .from{margin-bottom:.4em; color:var(--sub); font-size:.85em}
+  ol.defs{list-style:none; margin-top:.45em}
+  ol.defs > li{margin-bottom:.6em}
+  ol.defs.num{counter-reset:d}
+  ol.defs.num > li{counter-increment:d; position:relative; padding-left:1.5em}
+  ol.defs.num > li::before{content:counter(d); position:absolute; left:0; top:0; font-weight:800}
+  .sub{margin-top:.2em; padding-left:.9em; text-indent:-.9em}
+  .sub::before{content:"・"}
+  .ex{margin-top:.2em; color:var(--sub); font-size:.88em}
+  .ex::before{content:"例"; display:inline-block; margin-right:.4em; padding:0 .3em; border:1px solid var(--line); border-radius:4px; font-size:.8em; vertical-align:.1em}
+  .note{margin-bottom:1em; padding:.6em .8em; border-radius:10px; background:var(--soft); color:var(--sub); font-size:.85em}
+  .kcard{display:flex; gap:16px; align-items:flex-start; margin-bottom:1.3em; padding:14px; border:1px solid var(--line); border-radius:14px; background:var(--card)}
+  .kchar{flex:none; width:1.3em; font-size:2.4em; line-height:1.2; text-align:center; font-weight:600;
+         font-family:"Hiragino Mincho ProN","Yu Mincho","YuMincho","Noto Serif JP",serif}
+  .kinfo{flex:1; min-width:0}
+  .kcard dl{display:grid; grid-template-columns:auto 1fr; gap:.25em .8em; font-size:.9em}
+  .kcard dt{color:var(--sub); font-weight:600; white-space:nowrap}
+  .kmean{margin-top:.7em; font-size:.95em}
+  .wcard{margin-bottom:1.2em}
+  .wcard h3{font-size:1.05em; margin-bottom:.4em}
+  .wcard img{float:right; width:36%; max-width:160px; margin:0 0 .5em .8em; border-radius:10px; background:#fff}
+  .wcard p{white-space:pre-line}
+  .wcard a{color:var(--link); font-weight:700; text-decoration:none}
+  .wcard::after{content:""; display:block; clear:both}
+  .hits{display:flex; flex-direction:column; gap:8px; margin-bottom:1em}
+  .hit{display:block; text-align:left; padding:10px 12px; border-radius:12px; background:var(--card); border:1px solid var(--line)}
+  .hit b{display:block; color:var(--link)}
+  .hit small{display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:3; overflow:hidden; color:var(--sub); font-size:.8em; line-height:1.4}
+  .split{display:flex; flex-wrap:wrap; gap:8px; margin:.6em 0 1.2em}
+  .split .chip .b{font-size:1.15em}
+  .web{display:inline-flex; align-items:center; gap:6px; margin:.4em 0 1.2em; color:var(--link); font-weight:700; text-decoration:none}
+  .src{font-size:12px; color:var(--faint)}
+  .src a{color:inherit}
+  .empty{color:var(--sub); font-size:15px}
+  .empty h2{font-size:17px; color:var(--ink); margin-bottom:6px}
+  .recent{display:flex; flex-wrap:wrap; gap:8px; margin-top:14px}
+  .err button{margin-top:10px; height:40px; padding:0 16px; border-radius:20px; background:var(--accent); color:var(--accent-ink); font-weight:700}
+
+  .dfoot{flex:none; border-top:1px solid var(--line); background:var(--bg)}
+  #stripRow{display:flex; align-items:center}
+  #strip{flex:1; min-width:0; display:flex; gap:2px; overflow-x:auto; padding:4px 8px 2px 0; scrollbar-width:none}
+  #strip::-webkit-scrollbar{display:none}
+  #strip button{flex:none; padding:6px 12px; border-radius:10px; color:var(--link); font-size:18px; font-weight:700; white-space:nowrap}
+  #strip button.on{background:var(--accent-soft)}
+  #searchForm{position:relative; margin:6px max(12px, env(safe-area-inset-right)) 8px max(12px, env(safe-area-inset-left))}
+  #searchForm .ic{position:absolute; left:14px; top:12px; color:var(--sub)}
+  #q{width:100%; height:48px; padding:0 48px 0 46px; border-radius:24px; border:1px solid var(--line);
+     background:var(--card); color:var(--ink); font:inherit; font-size:18px; -webkit-appearance:none; appearance:none}
+  #q::-webkit-search-cancel-button{display:none}
+  #q:focus{outline:2px solid var(--accent); outline-offset:-1px}
+  #qClear{position:absolute; right:4px; top:4px; width:40px; height:40px; display:grid; place-items:center; color:var(--sub)}
+
+  /* ---- 履歴 ---- */
+  .hhead{flex:none; display:flex; justify-content:center; padding:0 12px 10px}
+  #hList{flex:1; min-height:0; overflow:auto; padding:0 max(12px, env(safe-area-inset-right)) 24px max(12px, env(safe-area-inset-left))}
+  .hitem{display:flex; align-items:center; margin-bottom:8px; border-radius:14px; background:var(--card); border:1px solid var(--line)}
+  .hitem .main{flex:1; min-width:0; display:block; padding:10px 4px 10px 14px; text-align:left}
+  .hitem .w{display:flex; align-items:baseline; gap:8px}
+  .hitem b{font-size:18px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .hitem .r{font-size:13px; color:var(--sub); white-space:nowrap}
+  .hitem time{margin-left:auto; font-size:12px; color:var(--faint); white-space:nowrap}
+  .hitem .s{display:block; font-size:13px; color:var(--sub); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .hitem .del{width:44px; height:44px; flex:none; display:grid; place-items:center; color:var(--faint)}
+  .hitem .del .ic{width:18px; height:18px}
+  .hclear{display:block; margin:16px auto 0; height:40px; padding:0 16px; border-radius:20px; color:var(--sub); font-size:14px; font-weight:600}
+  .hclear:active{background:var(--soft)}
+  .htag{display:inline-block; padding:0 6px; border-radius:6px; background:var(--soft); color:var(--sub); font-size:11px; font-weight:700; vertical-align:2px}
+
+  /* ---- 下: 画面の切り替え ---- */
+  #tabs{flex:none; display:grid; grid-template-columns:repeat(3, 1fr); gap:6px;
+        padding:6px max(16px, env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+        border-top:1px solid var(--line); background:var(--bg)}
+  #tabs button{display:flex; flex-direction:column; align-items:center; gap:1px; padding:5px 0 4px; border-radius:14px; font-size:12px; font-weight:700; color:var(--sub)}
+  #tabs button.on{background:var(--soft); color:var(--ink)}
+
+  /* ---- 文字を直す ---- */
+  .modal{position:fixed; inset:0; z-index:10; display:flex; align-items:flex-start; justify-content:center;
+         padding:calc(40px + env(safe-area-inset-top)) 16px 16px; background:rgba(0,0,0,.4)}
+  .modal-card{width:100%; max-width:520px; padding:18px; border-radius:20px; background:var(--card); box-shadow:var(--shadow)}
+  .modal-card h2{font-size:18px}
+  .modal-sub{margin-top:2px; font-size:13px; color:var(--sub)}
+  #editText{display:block; width:100%; margin-top:12px; padding:10px 12px; border-radius:12px; border:1px solid var(--line);
+            background:var(--bg); color:var(--ink); font:inherit; font-size:18px; resize:vertical}
+  .modal-btns{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:14px}
+  .btn{height:44px; padding:0 12px; border-radius:22px; background:var(--soft); font-weight:700}
+  .btn.primary{grid-column:1 / -1; order:-1; background:var(--accent); color:var(--accent-ink)}
+
+  #toast{position:fixed; left:50%; bottom:calc(96px + env(safe-area-inset-bottom)); z-index:20; transform:translateX(-50%);
+         max-width:86vw; padding:10px 16px; border-radius:12px; background:rgba(20,22,26,.9); color:#fff; font-size:14px; text-align:center}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-cam" viewBox="0 0 24 24"><path d="M3.5 8.5h3.2l1.8-2.8h7l1.8 2.8h3.2v10.8h-17z"/><circle cx="12" cy="13.6" r="3.4"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M5 5.5A2.5 2.5 0 0 1 7.5 3H19v15H7.5A2.5 2.5 0 0 0 5 20.5z"/><path d="M5 20.5A2.5 2.5 0 0 0 7.5 23H19v-5"/><path d="M9 8h6M9 11.5h6"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+  <symbol id="i-mark" viewBox="0 0 24 24"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"/></symbol>
+  <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 3.5v11"/><path d="M8 7.5l4-4 4 4"/><path d="M8.5 10.5H6v10h12v-10h-2.5"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></symbol>
+  <symbol id="i-zin" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5M8 10.5h5M10.5 8v5"/></symbol>
+  <symbol id="i-zout" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5M8 10.5h5"/></symbol>
+  <symbol id="i-light" viewBox="0 0 24 24"><path d="M13 3L6 13.5h5.2L10 21l7-10.5h-5.2z"/></symbol>
+  <symbol id="i-photo" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17.5l5-4.5 4 3.5 3-2.5 4 3.5"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-pen" viewBox="0 0 24 24"><path d="M4 20l1.2-4.6L15.8 4.8l3.4 3.4L8.6 18.8z"/><path d="M13.6 7l3.4 3.4"/></symbol>
+  <symbol id="i-dir" viewBox="0 0 24 24"><path d="M4 8h14l-3-3M20 16H6l3 3"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+</svg>
+
+<div id="app">
+  <header id="top">
+    <div class="seg" id="dictSeg" role="tablist" aria-label="辞書">
+      <button data-dict="ja" role="tab">国語・漢字</button>
+      <button data-dict="en" role="tab">英和・和英</button>
+      <button data-dict="wiki" role="tab">Wiki</button>
+    </div>
+  </header>
+
+  <main id="main">
+    <!-- スキャン -->
+    <section id="v-scan" class="view">
+      <p class="hint" id="hint">先頭の文字を矢印に合わせて撮ってください</p>
+      <div id="cam">
+        <video id="video" class="media" playsinline muted autoplay></video>
+        <canvas id="freeze" class="media" hidden></canvas>
+        <img id="still" class="media" alt="" hidden>
+        <div id="frame"><div id="band"></div></div>
+        <div id="arrow"></div>
+        <button id="btnBack" class="pillbtn" hidden><svg class="ic"><use href="#i-back"/></svg>カメラ</button>
+        <button id="btnDir" class="pillbtn" aria-label="縦書き・横書きの切り替え"><svg class="ic"><use href="#i-dir"/></svg><span id="dirLabel">縦書き</span></button>
+        <div id="zoomBadge"></div>
+        <div id="camMsg" hidden>
+          <p id="camMsgText"></p>
+          <div class="row"><button id="camRetry">もう一度</button><button id="camPhoto">写真を選ぶ</button></div>
+        </div>
+        <div id="controls">
+          <button id="btnPhoto" class="rbtn" aria-label="写真から読み取る"><svg class="ic"><use href="#i-photo"/></svg></button>
+          <button id="btnZoomOut" class="rbtn" aria-label="縮小"><svg class="ic"><use href="#i-zout"/></svg></button>
+          <button id="shutter" aria-label="撮って読み取る"></button>
+          <button id="btnZoomIn" class="rbtn" aria-label="拡大"><svg class="ic"><use href="#i-zin"/></svg></button>
+          <button id="btnTorch" class="rbtn ghost" aria-label="ライト"><svg class="ic"><use href="#i-light"/></svg></button>
+        </div>
+        <div id="sheet" hidden>
+          <div class="sheet-head">
+            <div class="sheet-title"><svg class="ic"><use href="#i-search"/></svg>タップして検索</div>
+            <div class="seg small" id="kanjiSeg">
+              <button data-kanji="0">すべて</button>
+              <button data-kanji="1">漢字のみ</button>
+            </div>
+          </div>
+          <button id="raw" hidden></button>
+          <div id="sheetMsg" class="sheet-msg"><span class="spin"></span><span id="sheetMsgText">読み取り中…</span><div class="bar"><i id="sheetBar"></i></div></div>
+          <div id="chips" hidden></div>
+          <div class="sheet-foot">
+            <button id="sheetClose" class="tbtn"><svg class="ic"><use href="#i-close"/></svg>閉じる</button>
+            <button id="sheetEdit" class="tbtn line"><svg class="ic"><use href="#i-pen"/></svg>編集</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 辞書 -->
+    <section id="v-dict" class="view" hidden>
+      <div class="dhead">
+        <div class="dtitle">
+          <div class="dword"><span id="dWord"></span><span id="dReading"></span></div>
+          <button id="btnMark" class="ibtn" aria-label="ブックマーク"><svg class="ic"><use href="#i-mark"/></svg></button>
+          <button id="btnShare" class="ibtn" aria-label="共有"><svg class="ic"><use href="#i-share"/></svg></button>
+        </div>
+        <div class="fsrow">文字サイズ
+          <div class="seg small" id="fontSeg">
+            <button data-font="0">小</button><button data-font="1">中</button><button data-font="2">大</button><button data-font="3">最大</button>
+          </div>
+        </div>
+      </div>
+      <div id="dBody"></div>
+      <div class="dfoot">
+        <div id="stripRow" hidden>
+          <button id="stripClear" class="ibtn" aria-label="単語の列を消す"><svg class="ic"><use href="#i-close"/></svg></button>
+          <div id="strip"></div>
+        </div>
+        <form id="searchForm" role="search">
+          <svg class="ic"><use href="#i-search"/></svg>
+          <input id="q" type="search" enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="ことばを入力" aria-label="調べることば">
+          <button id="qClear" type="button" aria-label="入力を消す" hidden><svg class="ic"><use href="#i-close"/></svg></button>
+        </form>
+      </div>
+    </section>
+
+    <!-- 履歴 -->
+    <section id="v-hist" class="view" hidden>
+      <div class="hhead">
+        <div class="seg small" id="histSeg">
+          <button data-hist="hist">履歴</button>
+          <button data-hist="marks">ブックマーク</button>
+        </div>
+      </div>
+      <div id="hList"></div>
+    </section>
+  </main>
+
+  <nav id="tabs">
+    <button data-view="scan"><svg class="ic"><use href="#i-cam"/></svg>スキャン</button>
+    <button data-view="dict"><svg class="ic"><use href="#i-book"/></svg>辞書</button>
+    <button data-view="hist"><svg class="ic"><use href="#i-clock"/></svg>履歴</button>
+  </nav>
+</div>
+
+<div id="editor" class="modal" hidden>
+  <form class="modal-card" id="editForm">
+    <h2>文字を直す</h2>
+    <p class="modal-sub">読み取りの間違いを直したり、調べたいことばを入れたりできます。</p>
+    <textarea id="editText" rows="3" autocapitalize="off" spellcheck="false"></textarea>
+    <div class="modal-btns">
+      <button type="button" class="btn" id="editCancel">やめる</button>
+      <button type="button" class="btn" id="editWhole">このまま調べる</button>
+      <button type="submit" class="btn primary">区切って表示</button>
+    </div>
+  </form>
+</div>
+
+<input type="file" id="file" accept="image/*" hidden>
+<div id="toast" hidden></div>
+
+<script>
+'use strict';
+
+/* ===== 外部ライブラリ =====
+ * 文字の読み取り（OCR）は Tesseract.js、単語の区切りと読みがなは kuromoji.js。
+ * どちらも使うときに CDN から読み込む（初回だけ合わせて約 25MB。あとはブラウザのキャッシュから）。
+ * 写真は端末の中だけで読み取り、外へ送るのは調べることばだけ。
+ */
+const LIB = {
+  tesseract: 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js',
+  kuromoji: 'https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/build/kuromoji.js',
+  kuromojiDict: 'https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/',
+};
+
+const scripts = {};
+function loadScript(src) {
+  return scripts[src] ||= new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = resolve;
+    s.onerror = () => { delete scripts[src]; s.remove(); reject(new Error('ライブラリを読み込めませんでした')); };
+    document.head.append(s);
+  });
+}
+
+/* ===== 保存 =====
+ * 設定・履歴・ブックマークは端末のブラウザ（localStorage）にだけ保存する。
+ */
+const STORE = 'camjisho';
+function load(key, fallback) {
+  try {
+    const v = localStorage.getItem(`${STORE}-${key}`);
+    return v == null ? fallback : JSON.parse(v);
+  } catch (e) {
+    return fallback;
+  }
+}
+function save(key, value) {
+  try {
+    localStorage.setItem(`${STORE}-${key}`, JSON.stringify(value));
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+const DICTS = ['ja', 'en', 'wiki'];
+// dict: 使う辞書 / vert: 辞書ごとの縦書き・横書き / font: 文字サイズ 0〜3 / kanjiOnly: 撮ったあとに漢字のことばだけ出す
+const SET = Object.assign({ dict: 'ja', vert: { ja: true, en: false, wiki: true }, font: 1, kanjiOnly: false }, load('settings', {}));
+if (!DICTS.includes(SET.dict)) SET.dict = 'ja';
+const saveSet = () => save('settings', SET);
+
+const HIST_MAX = 300;
+let HIST = load('history', []);     // [{ w: ことば, r: 読み, d: 辞書, s: 説明の頭, t: 時刻 }]（新しい順）
+let MARKS = load('marks', []);      // [{ w, r, s, t }]
+
+/* ===== 小物 ===== */
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const KANJI = /[\p{Script=Han}々〆ヶ]/u;
+const isLatin = w => /^[A-Za-z][A-Za-z'’ .-]*$/.test(w);
+const isSingleKanji = w => [...w].length === 1 && KANJI.test(w);
+const kataToHira = s => s.replace(/[ァ-ヶ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60));
+
+let toastTimer = 0;
+function toast(msg) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.hidden = true; }, 2200);
+}
+
+/* ===== 画面 ===== */
+const S = {
+  view: '',
+  text: '',          // 直近に読み取った（直した）文
+  tokens: [],        // その文を区切ったことば [{ s: 表記, b: 調べる形, r: 読み }]
+  cur: null,         // 辞書画面で表示中のことば { w, r, s }
+  seq: 0,            // 調べるたびに増やす（遅れて届いた古い結果を捨てる）
+  shot: 0,           // 撮るたびに増やす（閉じたあとに届いた読み取り結果を捨てる）
+  histTab: 'hist',
+};
+
+function show(view) {
+  if (view === 'scan' && S.view === 'scan') return;
+  S.view = view;
+  for (const v of ['scan', 'dict', 'hist']) $(`v-${v}`).hidden = v !== view;
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.view === view));
+  if (view === 'scan') {
+    closeSheet();
+    layoutFrame();
+  } else {
+    Cam.stop();
+  }
+  if (view === 'dict' && !S.cur) renderDictEmpty();
+  if (view === 'hist') renderHist();
+}
+
+function setDict(d) {
+  if (!DICTS.includes(d)) return;
+  const changed = SET.dict !== d;
+  SET.dict = d;
+  saveSet();
+  document.querySelectorAll('#dictSeg button').forEach(b => {
+    b.classList.toggle('on', b.dataset.dict === d);
+    b.setAttribute('aria-selected', b.dataset.dict === d);
+  });
+  updateDir();
+  if (!changed) return;
+  if (S.view === 'dict' && S.cur) openWord(S.cur.w, { r: S.cur.r });
+  if (S.view === 'scan') OCR.preload();
+}
+
+/* ===== カメラ =====
+ * mode: 'video'（カメラ）/ 'photo'（選んだ写真）
+ * view: 画面上の拡大と移動。ハードウェアのズームが使えないときと、写真のときに使う
+ */
+const Cam = {
+  mode: 'video',
+  stream: null,
+  track: null,
+  starting: false,
+  frozen: false,
+  hw: null,                 // ハードウェアのズーム { min, max, value }
+  torch: false,
+  view: { z: 1, tx: 0, ty: 0 },
+
+  async start() {
+    if (this.mode !== 'video' || this.stream || this.starting || this.frozen) return;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      camMessage(window.isSecureContext ? 'このブラウザではカメラを使えません。' : 'カメラは https のページでだけ使えます。');
+      return;
+    }
+    this.starting = true;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      });
+      // 許可を待つあいだに別の画面へ移っていたら、すぐ止める
+      if (S.view !== 'scan' || document.hidden || this.mode !== 'video' || this.frozen) {
+        stream.getTracks().forEach(t => t.stop());
+        return;
+      }
+      this.stream = stream;
+      this.track = stream.getVideoTracks()[0];
+      const video = $('video');
+      video.srcObject = stream;
+      await video.play().catch(() => {});
+      const caps = this.track.getCapabilities?.() || {};
+      this.hw = caps.zoom && caps.zoom.max > caps.zoom.min
+        ? { min: caps.zoom.min, max: Math.min(caps.zoom.max, caps.zoom.min * 8), value: this.track.getSettings?.().zoom || caps.zoom.min }
+        : null;
+      if (this.hw) this.view = { z: 1, tx: 0, ty: 0 };
+      $('btnTorch').classList.toggle('ghost', !caps.torch);
+      this.torch = false;
+      $('btnTorch').classList.remove('on');
+      applyView();
+      camMessage('');
+    } catch (e) {
+      camMessage(e.name === 'NotAllowedError'
+        ? 'カメラの使用が許可されていません。設定でカメラを許可するか、写真から読み取ってください。'
+        : 'カメラを起動できませんでした。写真から読み取ることもできます。');
+    } finally {
+      this.starting = false;
+    }
+  },
+
+  stop() {
+    if (this.stream) this.stream.getTracks().forEach(t => t.stop());
+    this.stream = null;
+    this.track = null;
+    $('video').srcObject = null;
+  },
+
+  // 撮った瞬間の画面を止めて見せ、カメラは切る
+  freeze() {
+    const video = $('video'), c = $('freeze');
+    c.width = video.videoWidth;
+    c.height = video.videoHeight;
+    c.getContext('2d').drawImage(video, 0, 0);
+    c.style.transform = video.style.transform;
+    c.hidden = false;
+    this.frozen = true;
+    this.stop();
+  },
+  unfreeze() {
+    $('freeze').hidden = true;
+    this.frozen = false;
+  },
+
+  // 読み取りに使う画像と、その大きさ
+  source() {
+    if (this.mode === 'photo') {
+      const img = $('still');
+      return img.naturalWidth ? { el: img, w: img.naturalWidth, h: img.naturalHeight } : null;
+    }
+    const video = $('video');
+    return video.readyState >= 2 && video.videoWidth ? { el: video, w: video.videoWidth, h: video.videoHeight } : null;
+  },
+
+  openPhoto(file) {
+    this.stop();
+    this.unfreeze();
+    closeSheet(false);
+    const img = $('still');
+    if (img.src) URL.revokeObjectURL(img.src);
+    img.src = URL.createObjectURL(file);
+    img.hidden = false;
+    $('video').hidden = true;
+    $('btnBack').hidden = false;
+    this.mode = 'photo';
+    this.view = { z: 1, tx: 0, ty: 0 };
+    applyView();
+    camMessage('');
+    updateHint();
+  },
+  backToCamera() {
+    const img = $('still');
+    if (img.src) URL.revokeObjectURL(img.src);
+    img.removeAttribute('src');
+    img.hidden = true;
+    $('video').hidden = false;
+    $('btnBack').hidden = true;
+    this.mode = 'video';
+    this.view = { z: 1, tx: 0, ty: 0 };
+    applyView();
+    updateHint();
+    this.start();
+  },
+
+  async zoomBy(f) {
+    let shown;
+    if (this.mode === 'video' && this.hw && this.track) {
+      const z = clamp(this.hw.value * f, this.hw.min, this.hw.max);
+      try {
+        await this.track.applyConstraints({ advanced: [{ zoom: z }] });
+        this.hw.value = z;
+        shown = z / this.hw.min;
+      } catch (e) {
+        this.hw = null;     // 効かなければ画面上の拡大に切り替える
+      }
+    }
+    if (shown == null) {
+      const v = this.view, z = clamp(v.z * f, this.mode === 'photo' ? 0.4 : 1, 8), k = z / v.z;
+      v.tx *= k;            // 画面の中心を動かさずに拡大する
+      v.ty *= k;
+      v.z = z;
+      applyView();
+      shown = z;
+    }
+    const b = $('zoomBadge');
+    b.textContent = `${shown.toFixed(1)}×`;
+    b.classList.add('show');
+    clearTimeout(b.timer);
+    b.timer = setTimeout(() => b.classList.remove('show'), 900);
+  },
+
+  async toggleTorch() {
+    if (!this.track) return;
+    try {
+      await this.track.applyConstraints({ advanced: [{ torch: !this.torch }] });
+      this.torch = !this.torch;
+      $('btnTorch').classList.toggle('on', this.torch);
+    } catch (e) {
+      toast('ライトを使えませんでした');
+    }
+  },
+};
+
+function applyView() {
+  const v = Cam.view, t = `translate(${v.tx}px, ${v.ty}px) scale(${v.z})`;
+  $('video').style.transform = t;
+  $('still').style.transform = t;
+}
+
+function camMessage(msg) {
+  $('camMsg').hidden = !msg;
+  $('camMsgText').textContent = msg;
+}
+
+// 写真は指で動かす・2本指で拡大縮小する
+const pointers = new Map();
+let pinch = null;
+function onPointerDown(e) {
+  if (Cam.mode !== 'photo' || !$('sheet').hidden || e.target.closest('button')) return;
+  $('cam').setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  pinch = null;
+}
+function onPointerMove(e) {
+  const p = pointers.get(e.pointerId);
+  if (!p) return;
+  const v = Cam.view;
+  if (pointers.size === 1) {
+    v.tx += e.clientX - p.x;
+    v.ty += e.clientY - p.y;
+  } else if (pointers.size === 2) {
+    const [a, b] = [...pointers.values()].map(q => (q === p ? { x: e.clientX, y: e.clientY } : q));
+    const r = $('cam').getBoundingClientRect();
+    const mid = { x: (a.x + b.x) / 2 - r.left - r.width / 2, y: (a.y + b.y) / 2 - r.top - r.height / 2 };
+    const dist = Math.hypot(a.x - b.x, a.y - b.y);
+    if (pinch) {
+      const z = clamp(v.z * dist / pinch.dist, 0.4, 8), k = z / v.z;
+      // 2本の指の中点の下にある所を動かさずに拡大し、中点の移動ぶん動かす
+      v.tx = mid.x - k * (pinch.mid.x - v.tx);
+      v.ty = mid.y - k * (pinch.mid.y - v.ty);
+      v.z = z;
+    }
+    pinch = { dist, mid };
+  }
+  p.x = e.clientX;
+  p.y = e.clientY;
+  applyView();
+}
+function onPointerUp(e) {
+  pointers.delete(e.pointerId);
+  pinch = null;
+}
+
+/* ===== 読み取る範囲 =====
+ * 枠の中の、点線と点線のあいだ（1行ぶん）だけを読み取る。
+ * 縦書きは上の ▼ から下へ、横書きは左の ▶ から右へ。
+ */
+let BAND = null;     // 点線のあいだ（#cam の中の座標）
+
+function layoutFrame() {
+  const cam = $('cam'), W = cam.clientWidth, H = cam.clientHeight;
+  if (!W || !H) return;
+  const vert = SET.vert[SET.dict];
+  const top = 66, bottom = H - 126;          // 上の切り替えボタンと下のボタンの分をあける
+  const room = Math.max(120, bottom - top);
+  let f, b;
+  if (vert) {
+    const fw = clamp(W * 0.56, 150, 340), fh = clamp(room, 140, 760);
+    f = { x: (W - fw) / 2, y: top + (room - fh) / 2, w: fw, h: fh };
+    const bw = Math.round(fw * 0.32);
+    b = { x: f.x + (fw - bw) / 2, y: f.y, w: bw, h: fh };
+  } else {
+    const fw = clamp(W * 0.84, 220, 600), fh = clamp(Math.min(fw * 0.46, room), 90, 230);
+    f = { x: (W - fw) / 2 + 6, y: top + (room - fh) / 2, w: fw, h: fh };
+    const bh = Math.round(fh * 0.36);
+    b = { x: f.x, y: f.y + (fh - bh) / 2, w: fw, h: bh };
+  }
+  BAND = b;
+  const frame = $('frame'), band = $('band'), arrow = $('arrow');
+  frame.className = vert ? 'v' : 'h';
+  Object.assign(frame.style, { left: `${f.x}px`, top: `${f.y}px`, width: `${f.w}px`, height: `${f.h}px` });
+  Object.assign(band.style, { left: `${b.x - f.x}px`, top: `${b.y - f.y}px`, width: `${b.w}px`, height: `${b.h}px` });
+  arrow.className = vert ? 'v' : 'h';
+  Object.assign(arrow.style, vert
+    ? { left: `${b.x + b.w / 2 - 13}px`, top: `${f.y - 22}px` }
+    : { left: `${f.x - 22}px`, top: `${b.y + b.h / 2 - 13}px` });
+}
+
+function updateDir() {
+  const vert = SET.vert[SET.dict];
+  $('dirLabel').textContent = vert ? '縦書き' : '横書き';
+  updateHint();
+  layoutFrame();
+}
+function updateHint() {
+  $('hint').textContent = Cam.mode === 'photo'
+    ? '写真を指で動かして、読みたい行を点線のあいだに入れてください'
+    : `先頭の文字を ${SET.vert[SET.dict] ? '▼' : '▶'} に合わせて撮ってください`;
+}
+
+// 点線のあいだを切り出して、読み取りやすく整える
+const OCR_THICK = 150;      // 読み取りに渡す画像の、行の太さ方向の大きさ（px）
+function cropBand(src, vert) {
+  const cam = $('cam'), W = cam.clientWidth, H = cam.clientHeight, v = Cam.view;
+  if (!BAND) return null;
+  // 画面の座標 → 画像の座標（object-fit:cover と拡大・移動を戻す）
+  const s = Math.max(W / src.w, H / src.h), ox = (W - src.w * s) / 2, oy = (H - src.h * s) / 2;
+  const toSrc = (x, y) => [
+    (W / 2 + (x - W / 2 - v.tx) / v.z - ox) / s,
+    (H / 2 + (y - H / 2 - v.ty) / v.z - oy) / s,
+  ];
+  const b = BAND;
+  let [x0, y0] = toSrc(b.x, b.y), [x1, y1] = toSrc(b.x + b.w, b.y + b.h);
+  x0 = clamp(x0, 0, src.w); x1 = clamp(x1, 0, src.w);
+  y0 = clamp(y0, 0, src.h); y1 = clamp(y1, 0, src.h);
+  const sw = x1 - x0, sh = y1 - y0;
+  if (sw < 8 || sh < 8) return null;
+  const k = clamp(OCR_THICK / (vert ? sw : sh), 0.3, 4);
+  const w = Math.round(sw * k), h = Math.round(sh * k);
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const g = c.getContext('2d', { willReadFrequently: true });
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(src.el, x0, y0, sw, sh, 0, 0, w, h);
+  enhance(g, w, h);
+  // まわりに白い余白を付ける（文字が端に接していると読み取りにくい）
+  const pad = Math.round(OCR_THICK * 0.2), out = document.createElement('canvas');
+  out.width = w + pad * 2;
+  out.height = h + pad * 2;
+  const og = out.getContext('2d');
+  og.fillStyle = '#fff';
+  og.fillRect(0, 0, out.width, out.height);
+  og.drawImage(c, pad, pad);
+  return out;
+}
+
+// 白黒にして、影や照明のむらをならし、濃淡を広げる
+function enhance(g, w, h) {
+  const img = g.getImageData(0, 0, w, h), d = img.data, n = w * h;
+  const gray = new Float32Array(n);
+  for (let i = 0, j = 0; i < n; i++, j += 4) gray[i] = d[j] * 0.299 + d[j + 1] * 0.587 + d[j + 2] * 0.114;
+
+  // 紙の明るさを区画ごとに見積もる（区画の中の明るいほうから 1 割の所）
+  const bs = Math.max(12, Math.round(Math.min(w, h) / 2));
+  const gw = Math.ceil(w / bs), gh = Math.ceil(h / bs), paper = new Float32Array(gw * gh);
+  const hist = new Uint32Array(64);
+  for (let by = 0; by < gh; by++) {
+    for (let bx = 0; bx < gw; bx++) {
+      hist.fill(0);
+      let cnt = 0;
+      for (let y = by * bs; y < Math.min(h, (by + 1) * bs); y++) {
+        for (let x = bx * bs; x < Math.min(w, (bx + 1) * bs); x++) { hist[gray[y * w + x] >> 2]++; cnt++; }
+      }
+      let acc = 0, bin = 63;
+      for (; bin > 0 && (acc += hist[bin]) < cnt * 0.1; bin--);
+      paper[by * gw + bx] = Math.max(24, bin * 4 + 2);
+    }
+  }
+  // 区画のあいだはなめらかにつなぐ
+  const at = (x, y) => paper[clamp(y, 0, gh - 1) * gw + clamp(x, 0, gw - 1)];
+  const out = new Float32Array(n), hist2 = new Uint32Array(256);
+  for (let y = 0; y < h; y++) {
+    const fy = (y + 0.5) / bs - 0.5, y0 = Math.floor(fy), ty = fy - y0;
+    for (let x = 0; x < w; x++) {
+      const fx = (x + 0.5) / bs - 0.5, x0 = Math.floor(fx), tx = fx - x0;
+      const p = (at(x0, y0) * (1 - tx) + at(x0 + 1, y0) * tx) * (1 - ty) + (at(x0, y0 + 1) * (1 - tx) + at(x0 + 1, y0 + 1) * tx) * ty;
+      const val = clamp(gray[y * w + x] / p * 255, 0, 255);
+      out[y * w + x] = val;
+      hist2[val | 0]++;
+    }
+  }
+  // 暗いほうの 1% を黒、明るいほうの 2% を白にそろえる
+  let lo = 0, hi = 255, acc = 0;
+  for (; lo < 254 && (acc += hist2[lo]) < n * 0.01; lo++);
+  acc = 0;
+  for (; hi > lo + 1 && (acc += hist2[hi]) < n * 0.02; hi--);
+  if (hi - lo < 24) { lo = 0; hi = 255; }
+  const f = 255 / (hi - lo);
+  for (let i = 0, j = 0; i < n; i++, j += 4) {
+    const val = clamp((out[i] - lo) * f, 0, 255);
+    d[j] = d[j + 1] = d[j + 2] = val;
+    d[j + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+}
+
+/* ===== 文字の読み取り（Tesseract.js） =====
+ * 縦書きは jpn_vert、横書きは jpn（英和・和英では eng+jpn）。言語の辞書は初回だけ各 2〜3MB を読み込む。
+ */
+const OCR = {
+  worker: null,
+  langs: '',
+  pending: null,    // 準備中の worker
+  running: null,    // 読み取り中
+  onProgress: null,
+
+  langsFor(vert, dict) {
+    return vert ? 'jpn_vert' : dict === 'en' ? 'eng+jpn' : 'jpn';
+  },
+
+  async get(langs) {
+    while (this.pending) await this.pending.catch(() => {});
+    if (this.worker && this.langs === langs) return this.worker;
+    this.pending = (async () => {
+      await loadScript(LIB.tesseract);
+      if (this.running) await this.running.catch(() => {});
+      if (this.worker) {
+        const old = this.worker;
+        this.worker = null;
+        this.langs = '';
+        old.terminate().catch(() => {});
+      }
+      const w = await Tesseract.createWorker(langs, 1, {
+        logger: m => this.onProgress?.(m),
+        errorHandler: e => console.warn(e),
+      });
+      this.worker = w;
+      this.langs = langs;
+      return w;
+    })();
+    try {
+      return await this.pending;
+    } finally {
+      this.pending = null;
+    }
+  },
+
+  preload() {
+    this.get(this.langsFor(SET.vert[SET.dict], SET.dict)).catch(() => {});
+  },
+
+  async read(canvas, vert, dict) {
+    const w = await this.get(this.langsFor(vert, dict));
+    const job = (async () => {
+      await w.setParameters({
+        tessedit_pageseg_mode: vert ? '5' : '7',   // 5: 縦書きの1ブロック / 7: 横書きの1行
+        preserve_interword_spaces: '1',
+        user_defined_dpi: '300',
+      });
+      const { data } = await w.recognize(canvas);
+      return data;
+    })();
+    this.running = job;
+    try {
+      return await job;
+    } finally {
+      if (this.running === job) this.running = null;
+    }
+  },
+};
+
+// 読み取った文字を整える（日本語の文字のあいだの空白や改行を詰める）
+const JP = '\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}ー々〆〇、。・「」『』（）〈〉《》【】〔〕…';
+const JP_GAP = new RegExp(`([${JP}])\\s+(?=[${JP}])`, 'gu');
+function cleanText(t, vert) {
+  t = t.normalize('NFKC').replace(/[|｜_]+/g, ' ');
+  t = vert ? t.replace(/\s*\n\s*/g, '') : t.replace(/\s*\n\s*/g, ' ');
+  return t.replace(JP_GAP, '$1').replace(/[ \t]{2,}/g, ' ').trim();
+}
+
+/* ===== 単語の区切りと読みがな（kuromoji.js） =====
+ * 辞書は約 17MB。起動したら裏で読み込んでおく。読めないときは Intl.Segmenter で区切るだけにする（読みがななし）。
+ */
+let tokenizerP = null;
+function getTokenizer() {
+  return tokenizerP ||= loadScript(LIB.kuromoji)
+    .then(() => new Promise((resolve, reject) => {
+      kuromoji.builder({ dicPath: LIB.kuromojiDict }).build((err, t) => (err ? reject(err) : resolve(t)));
+    }))
+    .catch(e => {
+      tokenizerP = null;
+      throw e;
+    });
+}
+
+async function toTokens(text) {
+  const tk = await getTokenizer().catch(e => { console.warn(e); return null; });
+  const out = [];
+  const pushJa = seg => {
+    if (!seg.trim()) return;
+    if (tk) {
+      for (const t of tk.tokenize(seg)) {
+        const s = t.surface_form;
+        if (t.pos === '記号' || /^[\p{P}\p{S}\s]+$/u.test(s)) continue;
+        const reading = KANJI.test(s) && t.reading && t.reading !== '*' ? kataToHira(t.reading) : '';
+        out.push({ s, b: t.basic_form && t.basic_form !== '*' ? t.basic_form : s, r: reading });
+      }
+    } else if (window.Intl?.Segmenter) {
+      for (const x of new Intl.Segmenter('ja', { granularity: 'word' }).segment(seg)) {
+        if (x.isWordLike) out.push({ s: x.segment, b: x.segment, r: '' });
+      }
+    } else {
+      out.push({ s: seg.trim(), b: seg.trim(), r: '' });
+    }
+  };
+  // 英字の語はそのまま1語にし、それ以外を kuromoji で区切る
+  let last = 0;
+  for (const m of text.matchAll(/[A-Za-z](?:[A-Za-z'’-]*[A-Za-z])?/g)) {
+    pushJa(text.slice(last, m.index));
+    out.push({ s: m[0], b: m[0], r: '' });
+    last = m.index + m[0].length;
+  }
+  pushJa(text.slice(last));
+  return out;
+}
+
+async function readingOf(word) {
+  if (!KANJI.test(word)) return '';
+  const tk = await getTokenizer().catch(() => null);
+  if (!tk) return '';
+  const ts = tk.tokenize(word);
+  if (!ts.length || ts.some(t => !t.reading || t.reading === '*')) return '';
+  return kataToHira(ts.map(t => t.reading).join(''));
+}
+
+/* ===== 撮って読み取る ===== */
+async function shoot() {
+  const src = Cam.source();
+  if (!src) {
+    toast(Cam.mode === 'photo' ? '写真を読み込んでいます' : 'カメラの準備ができていません');
+    return;
+  }
+  const vert = SET.vert[SET.dict];
+  const crop = cropBand(src, vert);
+  if (!crop) {
+    toast('点線のあいだに写真が入っていません');
+    return;
+  }
+  if (Cam.mode === 'video') Cam.freeze();
+  const shot = ++S.shot;
+  openSheet();
+  sheetStatus('読み取り中…', 0);
+  OCR.onProgress = m => {
+    if (shot !== S.shot) return;
+    if (m.status === 'recognizing text') sheetStatus('読み取り中…', m.progress);
+    else if (m.status === 'loading language traineddata') sheetStatus('文字の辞書を読み込み中…（初回のみ）', m.progress);
+    else sheetStatus('読み取りの準備中…', null);
+  };
+  try {
+    const data = await OCR.read(crop, vert, SET.dict);
+    if (shot !== S.shot) return;
+    const text = cleanText(data.text || '', vert);
+    sheetStatus('ことばに区切っています…', null);
+    await setText(text);
+    if (shot !== S.shot) return;
+    if (!S.tokens.length) {
+      sheetStatus(`読み取れませんでした。${vert ? '縦' : '横'}の1行が点線のあいだに収まるように、ズームで大きさを合わせて撮ってください。「編集」で入力もできます。`, undefined);
+    }
+  } catch (e) {
+    console.warn(e);
+    if (shot !== S.shot) return;
+    sheetStatus('読み取りの準備ができませんでした。電波のよい所で、もう一度撮ってください。', undefined);
+  }
+}
+
+async function setText(text) {
+  S.text = text;
+  S.tokens = text ? await toTokens(text) : [];
+  renderChips();
+  renderStrip();
+}
+
+function openSheet() {
+  $('sheet').hidden = false;
+  $('controls').hidden = true;
+  $('chips').hidden = true;
+  $('raw').hidden = true;
+  renderKanjiSeg();
+}
+// restart: 閉じたらカメラを動かしなおす
+function closeSheet(restart = true) {
+  S.shot++;
+  $('sheet').hidden = true;
+  $('controls').hidden = false;
+  if (Cam.mode === 'video') {
+    Cam.unfreeze();
+    if (restart && S.view === 'scan') Cam.start();
+  }
+}
+
+// progress: 0〜1 で進み具合の棒、null は棒を動かさない、undefined はくるくると棒を消す（結果の文）
+function sheetStatus(msg, progress) {
+  const box = $('sheetMsg');
+  box.hidden = false;
+  $('chips').hidden = true;
+  $('sheetMsgText').textContent = msg;
+  box.querySelector('.spin').hidden = progress === undefined;
+  box.querySelector('.bar').hidden = progress === undefined;
+  if (typeof progress === 'number') $('sheetBar').style.width = `${Math.round(progress * 100)}%`;
+}
+
+const visibleTokens = () => S.tokens.filter(t => !SET.kanjiOnly || KANJI.test(t.s));
+function chipHtml(t) {
+  return `<button class="chip" data-word="${esc(t.b)}" data-r="${esc(t.b === t.s ? t.r : '')}"><span class="r">${esc(t.r)}</span><span class="b">${esc(t.s)}</span></button>`;
+}
+function renderChips() {
+  const list = visibleTokens();
+  $('raw').hidden = !S.text;
+  $('raw').textContent = `読み取った文字: ${S.text}`;
+  if (!S.tokens.length) return;
+  $('sheetMsg').hidden = true;
+  $('chips').hidden = false;
+  $('chips').innerHTML = list.length ? list.map(chipHtml).join('') : '<p class="empty">漢字のことばはありません</p>';
+}
+function renderKanjiSeg() {
+  document.querySelectorAll('#kanjiSeg button').forEach(b => b.classList.toggle('on', (b.dataset.kanji === '1') === SET.kanjiOnly));
+}
+
+/* ===== 文字を直す ===== */
+function openEditor(text) {
+  $('editText').value = text;
+  $('editor').hidden = false;
+  setTimeout(() => $('editText').focus(), 50);
+}
+function closeEditor() {
+  $('editor').hidden = true;
+}
+
+/* ===== 辞書を引く =====
+ * 国語・漢字 … ウィクショナリー日本語版の「日本語」（1字の漢字は「漢字」も）。項目がなければ Wikipedia の冒頭
+ * 英和・和英 … 英語は ウィクショナリー日本語版の「英語」、日本語は ウィクショナリー英語版の「Japanese」
+ * Wiki     … Wikipedia 日本語版の冒頭（英語のことばは英語版も）
+ * どれも Wikimedia の API（CC BY-SA 4.0）。キーはいらない。
+ */
+const memo = new Map();
+function cached(key, fn) {
+  if (!memo.has(key)) memo.set(key, fn().catch(e => { memo.delete(key); throw e; }));
+  return memo.get(key);
+}
+async function getJSON(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+const api = (host, params) => `https://${host}/w/api.php?format=json&formatversion=2&origin=*&${params}`;
+
+function wikt(lang, title) {
+  return cached(`wikt:${lang}:${title}`, async () => {
+    const j = await getJSON(api(`${lang}.wiktionary.org`,
+      `action=parse&redirects=1&prop=text&disableeditsection=1&disablelimitreport=1&page=${encodeURIComponent(title)}`));
+    if (j.error || !j.parse) return null;      // 項目がない
+    return { lang, title: j.parse.title, langs: wiktParse(j.parse.text) };
+  });
+}
+function wikiPage(lang, title) {
+  return cached(`wiki:${lang}:${title}`, async () => {
+    const j = await getJSON(api(`${lang}.wikipedia.org`,
+      `action=query&redirects=1&prop=extracts%7Cpageimages&exintro=1&explaintext=1&piprop=thumbnail&pithumbsize=360&titles=${encodeURIComponent(title)}`));
+    const p = j.query?.pages?.[0];
+    if (!p || p.missing || p.invalid || !p.extract) return null;
+    return { lang, title: p.title, extract: p.extract.trim(), thumb: p.thumbnail?.source || '' };
+  });
+}
+function wikiSearch(lang, q) {
+  return cached(`search:${lang}:${q}`, async () => {
+    const j = await getJSON(api(`${lang}.wikipedia.org`,
+      `action=query&list=search&srlimit=8&srprop=snippet&srsearch=${encodeURIComponent(q)}`));
+    return (j.query?.search || []).map(x => ({ title: x.title, snippet: htmlText(x.snippet) }));
+  });
+}
+const htmlText = html => new DOMParser().parseFromString(html, 'text/html').body.textContent.trim();
+const wiktUrl = (lang, title) => `https://${lang}.wiktionary.org/wiki/${encodeURIComponent(title)}`;
+const WIKT_NAME = { ja: 'ウィクショナリー日本語版', en: 'ウィクショナリー英語版' };
+
+/* ウィクショナリーの HTML を、言語の見出し（h2）ごとに分ける。
+ * 品詞などの見出しの下の番号付きリスト（ol）を語義として取り出す。
+ *   [{ lang: '日本語', blocks: [{ head: '名詞', defs: [{ text, ex, sub, ref }], hw: { text, reading } }], items: [{ head, el }] }]
+ */
+const SKIP_HEAD = /^(発音|語源|脚注|出典|参考|参照|関連語|派生語|熟語|翻訳|類義語|対義語|上位語|下位語|同音異義語|異表記|活用|成句|コード等|字源|Pronunciation|Etymology|References|Further reading|Anagrams|Conjugation|Inflection|Declension|Usage notes|Synonyms|Antonyms|Derived terms|Related terms|Descendants|Translations|See also|Notes|Alternative forms|Coordinate terms|Hypernyms|Hyponyms|Readings|Compounds)/;
+
+function wiktParse(html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const root = doc.querySelector('.mw-parser-output') || doc.body;
+  const langs = [];
+  let L = null, head = '', lastP = null;
+  const walk = parent => {
+    for (const el of parent.children) {
+      if (el.tagName === 'SECTION') { walk(el); continue; }
+      const hd = headingOf(el);
+      if (hd) {
+        if (hd.lv <= 2) {
+          L = { lang: hd.text, blocks: [], items: [] };
+          langs.push(L);
+          head = '';
+        } else if (L) {
+          head = hd.text;
+        }
+        lastP = null;
+        continue;
+      }
+      if (!L) continue;
+      L.items.push({ head, el });
+      if (el.tagName === 'P') {
+        if (el.querySelector('.headword, strong')) lastP = el;
+      } else if (el.tagName === 'OL' && !el.classList.contains('references') && !SKIP_HEAD.test(head)) {
+        const defs = [...el.children].filter(li => li.tagName === 'LI').map(liToDef).filter(Boolean);
+        if (defs.length) {
+          L.blocks.push({ head, defs, hw: lastP ? { text: txt(lastP), reading: txt(lastP.querySelector('.headword-tr')) } : null });
+        }
+        lastP = null;
+      }
+    }
+  };
+  walk(root);
+  return langs;
+}
+
+function headingOf(el) {
+  let h = el;
+  if (el.classList.contains('mw-heading')) h = el.querySelector('h1, h2, h3, h4, h5, h6');
+  if (!h || !/^H[1-6]$/.test(h.tagName)) return null;
+  return { lv: +h.tagName[1], text: txt(h) };
+}
+
+// 要素の文字（ふりがなの rt、注の番号などは除く）
+function txt(el) {
+  if (!el) return '';
+  const c = el.cloneNode(true);
+  c.querySelectorAll('rt, rp, sup.reference, .reference, .mw-ref, style, script, .mw-editsection, .noprint').forEach(n => n.remove());
+  return c.textContent.replace(/\s+/g, ' ').trim();
+}
+
+function liToDef(li) {
+  const c = li.cloneNode(true);
+  const ex = [], sub = [];
+  for (const n of [...c.children]) {
+    if (n.tagName === 'OL') {
+      // 入れ子の番号付きリストは細かい語義
+      for (const d of n.querySelectorAll(':scope > li')) { const t = txt(d); if (t) sub.push(t); }
+      n.remove();
+    } else if (n.tagName === 'DL' || n.tagName === 'UL') {
+      // 用例（長い引用文は出さない）
+      for (const d of n.querySelectorAll(':scope > dd, :scope > li')) {
+        if (d.querySelector('.citation-whole, .cited-source')) continue;
+        const t = txt(d);
+        if (t && t.length <= 140) ex.push(t);
+      }
+      n.remove();
+    }
+  }
+  const text = txt(c);
+  if (!text && !sub.length) return null;
+  return { text, ex: ex.slice(0, 2), sub, ref: REF_DEF.test(text) ? refTarget(c, text) : null };
+}
+
+// 「おさめるを参照。」「ふかめるの漢字表記。」のように、ほかの項目に説明を任せている語義
+const REF_DEF = /(を参照|の漢字表記|の異表記|の別表記|の旧字体|の旧表記)。?$/;
+// その参照先
+function refTarget(li, text) {
+  const a = li.querySelector('a[title]:not(.new)');
+  if (a) return a.getAttribute('title').replace(/#.*/, '');
+  const m = text.match(/「([^」]+)」/);
+  return m ? m[1] : null;
+}
+
+// 1字の漢字の、音読み・訓読み・部首・意義
+function kanjiInfo(page, ch) {
+  const kj = page.langs.find(l => l.lang === '漢字'), jp = page.langs.find(l => l.lang === '日本語');
+  const k = { ch, on: [], kun: [], meta: '', grade: '', meanings: [] };
+  if (kj) {
+    k.meta = kj.items.filter(x => !x.head).flatMap(x => [...x.el.querySelectorAll('li')].map(txt))
+      .filter(t => /^(部首|総画)/.test(t)).join('、');
+    const m = kj.blocks.find(b => b.head === '意義');
+    if (m) k.meanings = m.defs;
+  }
+  const table = jp?.items.find(x => !x.head && x.el.tagName === 'TABLE' && /音|訓/.test(x.el.textContent));
+  if (table) {
+    for (const tr of table.el.querySelectorAll('tr')) {
+      const th = tr.querySelector('th'), td = tr.querySelector('td');
+      if (th && !td && !k.grade) k.grade = txt(th);
+      if (!th || !td) continue;
+      const vals = [...td.querySelectorAll('li')].map(li => txt(li).replace(/表[内外]/g, '').trim()).filter(Boolean)
+        .map(v => { const m = v.match(/^(.+?)\s*[:：]\s*(.+)$/); return !m ? v : /訓読み/.test(m[1]) ? m[2] : `${m[2]}（${m[1]}）`; });
+      if (/^音/.test(txt(th))) k.on.push(...vals);
+      else if (/^訓/.test(txt(th))) k.kun.push(...vals);
+    }
+  }
+  return k.on.length || k.kun.length || k.meanings.length || k.meta ? k : null;
+}
+
+const EN_POS = {
+  'Noun': '名詞', 'Proper noun': '固有名詞', 'Pronoun': '代名詞', 'Verb': '動詞', 'Adjective': '形容詞', 'Adverb': '副詞',
+  'Adnominal': '連体詞', 'Conjunction': '接続詞', 'Interjection': '感動詞', 'Particle': '助詞', 'Auxiliary': '助動詞',
+  'Prefix': '接頭辞', 'Suffix': '接尾辞', 'Affix': '接辞', 'Counter': '助数詞', 'Numeral': '数詞', 'Phrase': '句',
+  'Proverb': 'ことわざ', 'Idiom': '慣用句', 'Kanji': '漢字', 'Determiner': '限定詞', 'Preposition': '前置詞',
+  'Article': '冠詞', 'Contraction': '短縮形', 'Abbreviation': '略語', 'Symbol': '記号', 'Romanization': 'ローマ字',
+};
+const enPos = head => EN_POS[head.replace(/\s*\d+$/, '')] || head;
+
+const newResult = word => ({ word, reading: '', parts: [], src: [] });
+const addSrc = (R, page) => R.src.push({ name: WIKT_NAME[page.lang], title: page.title, url: wiktUrl(page.lang, page.title) });
+
+async function lookupJa(word) {
+  const R = newResult(word);
+  const page = await wikt('ja', word);
+  if (page) {
+    if (isSingleKanji(word)) {
+      const k = kanjiInfo(page, word);
+      if (k) R.parts.push({ kanji: k });
+    }
+    const jp = page.langs.find(l => l.lang === '日本語');
+    const L = jp?.blocks.length ? jp : page.langs.find(l => l.lang === '英語' && l.blocks.length);
+    if (L) {
+      R.reading = L.blocks.find(b => b.hw?.reading)?.hw.reading || '';
+      R.parts.push({ blocks: L.blocks, lang: L === jp ? '' : L.lang, showHw: L !== jp });
+      // ほかの項目に説明を任せている語義（〜を参照、〜の漢字表記 など）は、参照先も続けて出す
+      const refs = [...new Set(L.blocks.flatMap(b => b.defs.map(d => d.ref)).filter(t => t && t !== page.title))].slice(0, 2);
+      for (const t of refs) {
+        const p2 = await wikt('ja', t).catch(() => null);
+        const L2 = p2?.langs.find(l => l.lang === '日本語');
+        if (L2?.blocks.length) {
+          R.parts.push({ blocks: L2.blocks, from: p2.title });
+          addSrc(R, p2);
+        }
+      }
+    }
+    if (R.parts.length) addSrc(R, page);
+  }
+  if (!R.parts.length) {
+    const wp = await wikiPage('ja', word);
+    if (wp) {
+      R.parts.push({ note: `国語辞典（ウィクショナリー）に「${word}」の項目がないので、Wikipedia の説明を出しています。` }, { wiki: wp });
+      R.src.push(wikiSrc(wp));
+    }
+  }
+  return R;
+}
+
+// 英語の語の、辞書に載っていそうな形（小文字・複数形や過去形を戻した形）
+function englishForms(word) {
+  const w = word.trim(), lo = w.toLowerCase(), out = [lo];
+  const add = s => { if (s.length > 1 && !out.includes(s)) out.push(s); };
+  if (w !== lo) add(w);
+  if (/ies$/.test(lo)) add(`${lo.slice(0, -3)}y`);
+  if (/(s|x|z|ch|sh)es$/.test(lo)) add(lo.slice(0, -2));
+  if (/[^s]s$/.test(lo)) add(lo.slice(0, -1));
+  if (/ied$/.test(lo)) add(`${lo.slice(0, -3)}y`);
+  if (/ed$/.test(lo)) { if (/(.)\1ed$/.test(lo)) add(lo.slice(0, -3)); add(lo.slice(0, -2)); add(lo.slice(0, -1)); }
+  if (/ing$/.test(lo)) { if (/(.)\1ing$/.test(lo)) add(lo.slice(0, -4)); add(lo.slice(0, -3)); add(`${lo.slice(0, -3)}e`); }
+  return out.slice(0, 5);
+}
+// 「dog の複数形」のような変化形しか載っていない項目なら、元の形を返す
+function formOf(blocks) {
+  let base = null;
+  for (const b of blocks) {
+    for (const d of b.defs) {
+      const m = d.text.match(/^["“]?([A-Za-z][A-Za-z'-]*)["”]?\s*の.*(?:複数形|人称|過去|分詞|比較級|最上級|動名詞|変化形)/);
+      if (!m) return null;
+      base ||= m[1];
+    }
+  }
+  return base;
+}
+
+async function lookupEn(word) {
+  const R = newResult(word);
+  if (isLatin(word)) {
+    // 英和
+    for (const w of englishForms(word)) {
+      const page = await wikt('ja', w);
+      const L = page?.langs.find(l => l.lang === '英語');
+      if (!L?.blocks.length) continue;
+      R.parts.push({ blocks: L.blocks, from: page.title !== word ? page.title : '', showHw: true });
+      addSrc(R, page);
+      const base = formOf(L.blocks);
+      if (base && base !== page.title) {
+        const p2 = await wikt('ja', base).catch(() => null);
+        const L2 = p2?.langs.find(l => l.lang === '英語');
+        if (L2?.blocks.length) {
+          R.parts.push({ blocks: L2.blocks, from: p2.title, showHw: true });
+          addSrc(R, p2);
+        }
+      }
+      return R;
+    }
+    // 日本語の訳がなければ英英
+    for (const w of englishForms(word)) {
+      const page = await wikt('en', w);
+      const L = page?.langs.find(l => l.lang === 'English');
+      if (!L?.blocks.length) continue;
+      R.parts.push({ note: '日本語の訳が見つからないので、英語での説明（英英）を出しています。' },
+                   { blocks: L.blocks, pos: enPos, from: page.title !== word ? page.title : '', showHw: true });
+      addSrc(R, page);
+      return R;
+    }
+  } else {
+    // 和英
+    const page = await wikt('en', word);
+    const L = page?.langs.find(l => l.lang === 'Japanese');
+    if (L?.blocks.length) {
+      R.parts.push({ blocks: L.blocks, pos: enPos });
+      addSrc(R, page);
+    }
+  }
+  return R;
+}
+
+const wikiSrc = wp => ({ name: wp.lang === 'en' ? 'Wikipedia 英語版' : 'Wikipedia 日本語版', title: wp.title,
+                         url: `https://${wp.lang}.wikipedia.org/wiki/${encodeURIComponent(wp.title)}` });
+
+async function lookupWiki(word) {
+  const R = newResult(word);
+  for (const lang of isLatin(word) ? ['ja', 'en'] : ['ja']) {
+    const wp = await wikiPage(lang, word);
+    if (wp) {
+      R.parts.push({ wiki: wp });
+      R.src.push(wikiSrc(wp));
+      return R;
+    }
+  }
+  const hits = await wikiSearch('ja', word);
+  if (hits.length) R.parts.push({ note: `「${word}」という題の記事はありません。近い記事:` }, { search: hits });
+  return R;
+}
+
+const LOOKUP = { ja: lookupJa, en: lookupEn, wiki: lookupWiki };
+
+/* ===== 辞書画面 ===== */
+async function openWord(word, opts = {}) {
+  word = String(word || '').trim();
+  if (!word) return;
+  const seq = ++S.seq;
+  S.cur = { w: word, r: opts.r || '', s: '' };
+  if (S.view !== 'dict') show('dict');
+  $('q').value = word;
+  $('qClear').hidden = false;
+  renderHeader();
+  renderStrip();
+  const body = $('dBody');
+  body.innerHTML = '<p class="loading"><span class="spin"></span>調べています…</p>';
+  body.scrollTop = 0;
+  if (!S.cur.r) {
+    readingOf(word).then(r => {
+      if (seq !== S.seq || !r || S.cur.r) return;
+      S.cur.r = r;
+      renderHeader();
+      const h = HIST.find(x => x.w === word);
+      if (h && !h.r) { h.r = r; save('history', HIST); }
+    });
+  }
+  let R;
+  try {
+    R = await LOOKUP[SET.dict](word);
+  } catch (e) {
+    console.warn(e);
+    if (seq !== S.seq) return;
+    body.innerHTML = `<div class="empty err"><h2>調べられませんでした</h2><p>通信できませんでした。電波のよい所で、もう一度お試しください。</p><button data-retry>もう一度</button></div>`;
+    return;
+  }
+  if (seq !== S.seq) return;
+  if (!S.cur.r && R.reading && SET.dict === 'ja') {
+    S.cur.r = R.reading;
+    renderHeader();
+  }
+  if (!R.parts.length) R.split = (await toTokens(word)).filter(t => t.b !== word);
+  if (seq !== S.seq) return;
+  S.cur.s = snippetOf(R);
+  renderResult(R);
+  if (R.parts.length) addHist({ w: word, r: S.cur.r, d: SET.dict, s: S.cur.s, t: Date.now() });
+}
+
+function snippetOf(R) {
+  for (const p of R.parts) {
+    if (p.kanji) return [p.kanji.on.join('・'), p.kanji.kun.join('・')].filter(Boolean).join(' / ');
+    if (p.blocks) {
+      // 「〜を参照」だけの語義は飛ばす（参照先の語義が後ろの parts にある）
+      const d = p.blocks.flatMap(b => b.defs).find(x => !x.ref);
+      if (d) return d.text || d.sub[0] || '';
+    }
+    if (p.wiki) return p.wiki.extract;
+  }
+  return '';
+}
+
+function renderHeader() {
+  const c = S.cur;
+  $('dWord').textContent = c ? c.w : '辞書';
+  $('dReading').textContent = c?.r && c.r !== c.w ? c.r : '';
+  $('btnMark').hidden = $('btnShare').hidden = !c;
+  $('btnMark').classList.toggle('on', !!c && MARKS.some(m => m.w === c.w));
+}
+
+function renderDictEmpty() {
+  renderHeader();
+  const recent = HIST.slice(0, 12);
+  $('dBody').innerHTML = `<div class="empty"><h2>ことばを調べる</h2>
+    <p>「スキャン」で本の文字を撮るか、下の欄にことばを入れてください。上で辞書を切り替えられます。</p>
+    ${recent.length ? `<div class="recent">${recent.map(h => `<button class="chip" data-word="${esc(h.w)}" data-r="${esc(h.r)}"><span class="r">${esc(h.r)}</span><span class="b">${esc(h.w)}</span></button>`).join('')}</div>` : ''}</div>`;
+}
+
+function renderBlocks(p) {
+  const label = p.pos || (h => h);
+  return `${p.from ? `<p class="from">「${esc(p.from)}」の項目より</p>` : ''}${p.lang ? `<p class="from">${esc(p.lang)}</p>` : ''}` +
+    p.blocks.map(b => `<section class="blk">
+      <div><span class="pos">${esc(label(b.head) || '意味')}</span>${p.showHw && b.hw?.text ? `<span class="hw">${esc(b.hw.text)}</span>` : ''}</div>
+      <ol class="defs${b.defs.length > 1 ? ' num' : ''}">${b.defs.map(d => `<li>
+        ${d.text ? `<p>${esc(d.text)}</p>` : ''}${d.sub.map(t => `<p class="sub">${esc(t)}</p>`).join('')}${d.ex.map(t => `<p class="ex">${esc(t)}</p>`).join('')}
+      </li>`).join('')}</ol></section>`).join('');
+}
+
+function renderKanji(k) {
+  const rows = [];
+  if (k.on.length) rows.push(['音読み', k.on.join('、')]);
+  if (k.kun.length) rows.push(['訓読み', k.kun.join('、')]);
+  if (k.meta) rows.push(['部首・画数', k.meta]);
+  if (k.grade) rows.push(['区分', k.grade]);
+  return `<section class="kcard"><div class="kchar">${esc(k.ch)}</div><div class="kinfo"><dl>
+    ${rows.map(([a, b]) => `<dt>${a}</dt><dd>${esc(b)}</dd>`).join('')}</dl>
+    ${k.meanings.length ? `<div class="kmean"><span class="pos">意義</span><ol class="defs${k.meanings.length > 1 ? ' num' : ''}">${k.meanings.map(d => `<li><p>${esc(d.text)}</p>${d.sub.map(t => `<p class="sub">${esc(t)}</p>`).join('')}</li>`).join('')}</ol></div>` : ''}
+  </div></section>`;
+}
+
+function renderWiki(wp) {
+  const more = wp.extract.length > 700;
+  const text = more ? `${wp.extract.slice(0, 700)}…` : wp.extract;
+  const url = `https://${wp.lang}.wikipedia.org/wiki/${encodeURIComponent(wp.title)}`;
+  return `<section class="wcard">${wp.thumb ? `<img src="${esc(wp.thumb)}" alt="" loading="lazy">` : ''}
+    <h3>${esc(wp.title)}</h3><p>${esc(text)}</p>
+    <p><a href="${esc(url)}" target="_blank" rel="noopener">Wikipedia で${more ? '続きを' : ''}読む</a></p></section>`;
+}
+
+function webLink(word) {
+  const q = SET.dict === 'wiki' ? word : SET.dict === 'en' && !isLatin(word) ? `${word} 英語` : `${word} 意味`;
+  return `<a class="web" href="https://www.google.com/search?q=${encodeURIComponent(q)}" target="_blank" rel="noopener"><svg class="ic"><use href="#i-search"/></svg>「${esc(word)}」をWebで検索</a>`;
+}
+
+function renderResult(R) {
+  const html = [];
+  for (const p of R.parts) {
+    if (p.kanji) html.push(renderKanji(p.kanji));
+    else if (p.blocks) html.push(renderBlocks(p));
+    else if (p.note) html.push(`<p class="note">${esc(p.note)}</p>`);
+    else if (p.wiki) html.push(renderWiki(p.wiki));
+    else if (p.search) html.push(`<div class="hits">${p.search.map(h => `<button class="hit" data-word="${esc(h.title)}"><b>${esc(h.title)}</b><small>${esc(h.snippet)}</small></button>`).join('')}</div>`);
+  }
+  if (!R.parts.length) {
+    html.push(`<div class="empty"><h2>見つかりませんでした</h2><p>「${esc(R.word)}」は${SET.dict === 'wiki' ? 'Wikipedia' : '辞書'}に見つかりませんでした。</p></div>`);
+    if (R.split?.length) html.push(`<p class="from">分けて調べる:</p><div class="split">${R.split.map(chipHtml).join('')}</div>`);
+  }
+  html.push(webLink(R.word));
+  if (R.src.length) {
+    html.push(`<p class="src">出典: ${R.src.map(s => `<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.name)}「${esc(s.title)}」</a>`).join('、')}（CC BY-SA 4.0）</p>`);
+  }
+  $('dBody').innerHTML = html.join('');
+}
+
+function renderStrip() {
+  const list = visibleTokens();
+  $('stripRow').hidden = !list.length;
+  $('strip').innerHTML = list.map(t => `<button data-word="${esc(t.b)}" data-r="${esc(t.b === t.s ? t.r : '')}" class="${S.cur && t.b === S.cur.w ? 'on' : ''}">${esc(t.s)}</button>`).join('');
+  $('strip').querySelector('.on')?.scrollIntoView({ block: 'nearest', inline: 'center' });
+}
+
+function renderFont() {
+  $('dBody').className = `fs${SET.font}`;
+  document.querySelectorAll('#fontSeg button').forEach(b => b.classList.toggle('on', +b.dataset.font === SET.font));
+}
+
+function toggleMark() {
+  const c = S.cur;
+  if (!c) return;
+  const i = MARKS.findIndex(m => m.w === c.w);
+  if (i >= 0) MARKS.splice(i, 1);
+  else MARKS.unshift({ w: c.w, r: c.r, s: c.s, t: Date.now() });
+  save('marks', MARKS);
+  renderHeader();
+  toast(i >= 0 ? 'ブックマークを外しました' : 'ブックマークしました');
+}
+
+async function share() {
+  const c = S.cur;
+  if (!c) return;
+  const url = `${location.origin}${location.pathname}#q=${encodeURIComponent(c.w)}&d=${SET.dict}`;
+  const text = `${c.w}${c.r && c.r !== c.w ? `（${c.r}）` : ''}${c.s ? `\n${c.s.slice(0, 120)}` : ''}`;
+  if (navigator.share) {
+    try { await navigator.share({ title: c.w, text, url }); } catch (e) { /* 閉じただけ */ }
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(`${text}\n${url}`);
+    toast('コピーしました');
+  } catch (e) {
+    toast('共有できませんでした');
+  }
+}
+
+/* ===== 履歴とブックマーク ===== */
+function addHist(entry) {
+  HIST = [entry, ...HIST.filter(x => x.w !== entry.w)].slice(0, HIST_MAX);
+  save('history', HIST);
+}
+
+function when(t) {
+  const d = new Date(t), now = new Date();
+  if (d.toDateString() === now.toDateString()) return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return d.getFullYear() === now.getFullYear() ? `${d.getMonth() + 1}/${d.getDate()}` : `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+}
+const DICT_TAG = { ja: '国語', en: '英和', wiki: 'Wiki' };
+
+function renderHist() {
+  const marks = S.histTab === 'marks', list = marks ? MARKS : HIST;
+  document.querySelectorAll('#histSeg button').forEach(b => b.classList.toggle('on', b.dataset.hist === S.histTab));
+  if (!list.length) {
+    $('hList').innerHTML = `<p class="empty" style="text-align:center; padding-top:24px">${marks ? '辞書の画面の しおり ボタンで、ことばをブックマークできます。' : 'まだ調べたことばはありません。'}</p>`;
+    return;
+  }
+  $('hList').innerHTML = list.map((x, i) => `<div class="hitem">
+      <button class="main" data-open="${i}">
+        <span class="w"><b>${esc(x.w)}</b>${x.r && x.r !== x.w ? `<span class="r">${esc(x.r)}</span>` : ''}${!marks && x.d ? `<span class="htag">${DICT_TAG[x.d] || ''}</span>` : ''}<time>${when(x.t)}</time></span>
+        <span class="s">${esc(x.s)}</span>
+      </button>
+      <button class="del" data-del="${i}" aria-label="消す"><svg class="ic"><use href="#i-close"/></svg></button>
+    </div>`).join('') + (marks ? '' : '<button class="hclear" id="histClear">履歴をすべて消す</button>');
+}
+
+function onHistClick(e) {
+  const marks = S.histTab === 'marks', list = marks ? MARKS : HIST;
+  const open = e.target.closest('[data-open]'), del = e.target.closest('[data-del]');
+  if (open) {
+    const x = list[+open.dataset.open];
+    if (!x) return;
+    if (!marks && x.d) setDict(x.d);
+    openWord(x.w, { r: x.r });
+  } else if (del) {
+    list.splice(+del.dataset.del, 1);
+    save(marks ? 'marks' : 'history', list);
+    renderHist();
+  } else if (e.target.closest('#histClear')) {
+    if (!confirm('履歴をすべて消しますか？（ブックマークは残ります）')) return;
+    HIST = [];
+    save('history', HIST);
+    renderHist();
+  }
+}
+
+/* ===== つなぐ ===== */
+function onWordClick(e) {
+  const b = e.target.closest('[data-word]');
+  if (b) openWord(b.dataset.word, { r: b.dataset.r });
+  else if (e.target.closest('[data-retry]') && S.cur) openWord(S.cur.w, { r: S.cur.r });
+}
+
+function init() {
+  document.querySelectorAll('#dictSeg button').forEach(b => b.addEventListener('click', () => setDict(b.dataset.dict)));
+  document.querySelectorAll('#tabs button').forEach(b => b.addEventListener('click', () => show(b.dataset.view)));
+
+  $('shutter').addEventListener('click', shoot);
+  $('btnZoomIn').addEventListener('click', () => Cam.zoomBy(1.5));
+  $('btnZoomOut').addEventListener('click', () => Cam.zoomBy(1 / 1.5));
+  $('btnTorch').addEventListener('click', () => Cam.toggleTorch());
+  $('btnDir').addEventListener('click', () => {
+    SET.vert[SET.dict] = !SET.vert[SET.dict];
+    saveSet();
+    updateDir();
+    OCR.preload();
+  });
+  const pickPhoto = () => $('file').click();
+  $('btnPhoto').addEventListener('click', pickPhoto);
+  $('camPhoto').addEventListener('click', pickPhoto);
+  $('camRetry').addEventListener('click', () => Cam.start());
+  $('btnBack').addEventListener('click', () => Cam.backToCamera());
+  $('file').addEventListener('change', e => {
+    const f = e.target.files?.[0];
+    if (f) Cam.openPhoto(f);
+    e.target.value = '';
+  });
+  const cam = $('cam');
+  cam.addEventListener('pointerdown', onPointerDown);
+  cam.addEventListener('pointermove', onPointerMove);
+  cam.addEventListener('pointerup', onPointerUp);
+  cam.addEventListener('pointercancel', onPointerUp);
+  new ResizeObserver(layoutFrame).observe(cam);
+
+  $('sheetClose').addEventListener('click', () => closeSheet());
+  $('sheetEdit').addEventListener('click', () => openEditor(S.text));
+  $('raw').addEventListener('click', () => openEditor(S.text));
+  $('chips').addEventListener('click', onWordClick);
+  document.querySelectorAll('#kanjiSeg button').forEach(b => b.addEventListener('click', () => {
+    SET.kanjiOnly = b.dataset.kanji === '1';
+    saveSet();
+    renderKanjiSeg();
+    renderChips();
+    renderStrip();
+  }));
+
+  $('editCancel').addEventListener('click', closeEditor);
+  $('editForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const text = $('editText').value.trim();
+    closeEditor();
+    S.shot++;            // 読み取り中だったら、その結果は使わない
+    if (S.view === 'scan') {
+      if ($('sheet').hidden) openSheet();
+      sheetStatus('ことばに区切っています…', null);
+    }
+    await setText(text);
+    if (S.view === 'scan' && !S.tokens.length) sheetStatus('ことばがありません。', undefined);
+  });
+  $('editWhole').addEventListener('click', () => {
+    const text = $('editText').value.trim();
+    closeEditor();
+    if (text) openWord(text);
+  });
+
+  $('dBody').addEventListener('click', onWordClick);
+  $('strip').addEventListener('click', onWordClick);
+  $('stripClear').addEventListener('click', () => { S.tokens = []; S.text = ''; renderStrip(); });
+  $('btnMark').addEventListener('click', toggleMark);
+  $('btnShare').addEventListener('click', share);
+  document.querySelectorAll('#fontSeg button').forEach(b => b.addEventListener('click', () => {
+    SET.font = +b.dataset.font;
+    saveSet();
+    renderFont();
+  }));
+  $('searchForm').addEventListener('submit', e => {
+    e.preventDefault();
+    $('q').blur();
+    openWord($('q').value);
+  });
+  $('q').addEventListener('input', () => { $('qClear').hidden = !$('q').value; });
+  $('qClear').addEventListener('click', () => {
+    $('q').value = '';
+    $('qClear').hidden = true;
+    $('q').focus();
+  });
+
+  document.querySelectorAll('#histSeg button').forEach(b => b.addEventListener('click', () => {
+    S.histTab = b.dataset.hist;
+    renderHist();
+  }));
+  $('hList').addEventListener('click', onHistClick);
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) Cam.stop();
+    else if (S.view === 'scan' && $('sheet').hidden) Cam.start();
+  });
+
+  setDict(SET.dict);
+  renderFont();
+  renderKanjiSeg();
+
+  // 共有されたリンク（…#q=ことば&d=辞書）で開いたときは、そのことばを引く
+  const hash = new URLSearchParams(location.hash.slice(1));
+  if (hash.get('q')) {
+    history.replaceState(null, '', location.pathname + location.search);
+    if (hash.get('d')) setDict(hash.get('d'));
+    openWord(hash.get('q'));
+  } else {
+    show('scan');     // カメラも動かしはじめる
+  }
+
+  // 初回の待ち時間を減らすため、読み取りと区切りの辞書を裏で読み込んでおく
+  setTimeout(() => {
+    getTokenizer().catch(() => {});
+    if (S.view === 'scan') OCR.preload();
+  }, 800);
+}
+
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "name": "カメラ辞書",
+  "short_name": "カメラ辞書",
+  "description": "本や紙の文字をカメラで撮って、そのまま国語辞典・英和辞典・Wikipedia で調べる辞書アプリ。",
+  "lang": "ja",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f4f6f9",
+  "theme_color": "#2a7bd4",
+  "icons": [
+    { "src": "apple-touch-icon.png", "sizes": "180x180", "type": "image/png", "purpose": "any" }
+  ]
+}
