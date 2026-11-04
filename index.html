@@ -189,7 +189,12 @@
   .hit small{display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:3; overflow:hidden; color:var(--sub); font-size:.8em; line-height:1.4}
   .split{display:flex; flex-wrap:wrap; gap:8px; margin:.6em 0 1.2em}
   .split .chip .b{font-size:1.15em}
-  .web{display:inline-flex; align-items:center; gap:6px; margin:.4em 0 1.2em; color:var(--link); font-weight:700; text-decoration:none}
+  .links{display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:.6em 0 1.2em; font-size:15px}
+  .links span{flex-basis:100%; color:var(--sub); font-size:13px; font-weight:600}
+  .links a{display:inline-flex; align-items:center; height:36px; padding:0 14px; border-radius:18px; border:1.5px solid var(--accent);
+           color:var(--link); font-weight:700; text-decoration:none}
+  .links a:active{background:var(--accent-soft)}
+  .links.big a{height:44px; padding:0 18px; background:var(--accent); color:var(--accent-ink)}
   .src{font-size:12px; color:var(--faint)}
   .src a{color:inherit}
   .empty{color:var(--sub); font-size:15px}
@@ -402,7 +407,7 @@
 <script>
 'use strict';
 
-const VERSION = '2026-11-04d';
+const VERSION = '2026-11-04e';
 
 /* ===== 外部ライブラリ =====
  * 文字の読み取り（OCR）は Tesseract.js、単語の区切りと読みがなは kuromoji.js。
@@ -1683,9 +1688,20 @@ function renderWiki(wp) {
     <p><a href="${esc(url)}" target="_blank" rel="noopener">Wikipedia で${more ? '続きを' : ''}読む</a></p></section>`;
 }
 
-function webLink(word) {
+/* ほかの辞書・Web で調べるリンク。
+ * コトバンク・Weblio は市販の辞書を収録していて、ウィクショナリーより語数がずっと多い（下学・雑話 など）。
+ * ただし内容はアプリに取り込めない（ブラウザから読めず、規約上も）ので、そのことばのページを開くリンクだけ出す。
+ * コトバンクは載っていない語だと直接のページが 404 になるので、検索のページを開く。
+ * big: 辞書に見つからなかったときに目立たせる
+ */
+function moreLinks(word, big) {
+  const e = encodeURIComponent(word), links = [];
+  if (SET.dict === 'ja') links.push(['コトバンク', `https://kotobank.jp/search?q=${e}`], ['Weblio', `https://www.weblio.jp/content/${e}`]);
+  if (SET.dict === 'en') links.push(['Weblio 英和・和英', `https://ejje.weblio.jp/content/${e}`]);
   const q = SET.dict === 'wiki' ? word : SET.dict === 'en' && !isLatin(word) ? `${word} 英語` : `${word} 意味`;
-  return `<a class="web" href="https://www.google.com/search?q=${encodeURIComponent(q)}" target="_blank" rel="noopener"><svg class="ic"><use href="#i-search"/></svg>「${esc(word)}」をWebで検索</a>`;
+  links.push(['Web で検索', `https://www.google.com/search?q=${encodeURIComponent(q)}`]);
+  return `<div class="links${big ? ' big' : ''}">${big ? '' : '<span>ほかで調べる</span>'}${links.map(([name, url]) =>
+    `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(name)}</a>`).join('')}</div>`;
 }
 
 function renderResult(R) {
@@ -1698,10 +1714,13 @@ function renderResult(R) {
     else if (p.search) html.push(`<div class="hits">${p.search.map(h => `<button class="hit" data-word="${esc(h.title)}"><b>${esc(h.title)}</b><small>${esc(h.snippet)}</small></button>`).join('')}</div>`);
   }
   if (!R.parts.length) {
-    html.push(`<div class="empty"><h2>見つかりませんでした</h2><p>「${esc(R.word)}」は${SET.dict === 'wiki' ? 'Wikipedia' : '辞書'}に見つかりませんでした。</p></div>`);
-    if (R.split?.length) html.push(`<p class="from">分けて調べる:</p><div class="split">${R.split.map(chipHtml).join('')}</div>`);
+    const more = { ja: 'コトバンクや Weblio（市販の国語辞典などを収録）なら載っていることがあります。', en: 'Weblio（英和・和英辞典を収録）なら載っていることがあります。' }[SET.dict] || '';
+    html.push(`<div class="empty"><h2>見つかりませんでした</h2><p>「${esc(R.word)}」は${SET.dict === 'wiki' ? 'Wikipedia' : 'ウィクショナリー'}に載っていません。${more}</p></div>`);
   }
-  html.push(webLink(R.word));
+  // 辞書（ウィクショナリー）の語義がなかったときは、ほかの辞書へのリンクを目立たせる
+  const noDict = SET.dict !== 'wiki' && !R.parts.some(p => p.blocks || p.kanji);
+  html.push(moreLinks(R.word, noDict));
+  if (!R.parts.length && R.split?.length) html.push(`<p class="from">分けて調べる:</p><div class="split">${R.split.map(chipHtml).join('')}</div>`);
   if (R.src.length) {
     html.push(`<p class="src">出典: ${R.src.map(s => `<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.name)}「${esc(s.title)}」</a>`).join('、')}（CC BY-SA 4.0）</p>`);
   }
