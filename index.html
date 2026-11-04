@@ -111,7 +111,20 @@
   .sheet-title{flex:1; display:flex; align-items:center; gap:6px; font-size:17px; font-weight:800}
   #raw{flex:none; display:block; width:100%; margin-top:8px; padding:6px 10px; border-radius:10px; text-align:left;
        background:var(--soft); color:var(--sub); font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
-  #chips{flex:1; min-height:0; overflow:auto; padding:12px 0 6px; display:flex; flex-wrap:wrap; gap:8px; align-content:flex-start}
+  /* 読み取った範囲（左に縦長、横書きは上に横長）と、ことばの一覧 */
+  #sheetBody{flex:1; min-height:0; display:flex; gap:12px; margin-top:10px}
+  #sheetBody.h{flex-direction:column; gap:8px}
+  #sheetMain{flex:1; min-width:0; min-height:0; overflow:auto}
+  #cropBox{flex:none; display:flex; flex-direction:column; align-items:center; gap:3px; color:var(--faint); font-size:10px; font-weight:700; cursor:zoom-in}
+  #cropBox canvas{display:block; border:1px solid var(--line); border-radius:6px; background:#fff; object-fit:contain}
+  #sheetBody.v #cropBox canvas{height:clamp(90px, 22vh, 170px); width:auto; max-width:64px}
+  #sheetBody.h #cropBox{align-items:stretch}
+  #sheetBody.h #cropBox canvas{width:100%; height:auto; max-height:64px}
+  #chips{padding:2px 0 6px; display:flex; flex-wrap:wrap; gap:8px; align-content:flex-start}
+  #cropBig{align-items:center; justify-content:center; padding:16px; background:rgba(0,0,0,.88)}
+  #cropBig figure{display:flex; flex-direction:column; align-items:center; gap:12px; max-width:100%}
+  #cropBigImg{display:block; max-width:92vw; max-height:72vh; object-fit:contain; border-radius:8px; background:#fff}
+  #cropBig figcaption{max-width:340px; color:#fff; font-size:13px; text-align:center}
   .chip{display:flex; flex-direction:column; align-items:center; justify-content:flex-end; min-width:46px; padding:4px 10px 6px;
         border-radius:12px; background:var(--soft); color:var(--link); line-height:1.15}
   .chip:active{background:var(--accent-soft)}
@@ -300,8 +313,13 @@
             </div>
           </div>
           <button id="raw" hidden></button>
-          <div id="sheetMsg" class="sheet-msg"><span class="spin"></span><span id="sheetMsgText">読み取り中…</span><div class="bar"><i id="sheetBar"></i></div></div>
-          <div id="chips" hidden></div>
+          <div id="sheetBody">
+            <button id="cropBox" hidden aria-label="読み取った範囲を大きく見る"><span>読んだ範囲</span></button>
+            <div id="sheetMain">
+              <div id="sheetMsg" class="sheet-msg"><span class="spin"></span><span id="sheetMsgText">読み取り中…</span><div class="bar"><i id="sheetBar"></i></div></div>
+              <div id="chips" hidden></div>
+            </div>
+          </div>
           <div class="sheet-foot">
             <button id="sheetClose" class="tbtn"><svg class="ic"><use href="#i-close"/></svg>閉じる</button>
             <button id="sheetEdit" class="tbtn line"><svg class="ic"><use href="#i-pen"/></svg>編集</button>
@@ -357,6 +375,13 @@
   </nav>
 </div>
 
+<div id="cropBig" class="modal" hidden>
+  <figure>
+    <img id="cropBigImg" alt="読み取った範囲">
+    <figcaption>点線のあいだを切り出して、読み取りやすく整えた画像です。この画像の文字を読み取りました。タップで閉じます。</figcaption>
+  </figure>
+</div>
+
 <div id="editor" class="modal" hidden>
   <form class="modal-card" id="editForm">
     <h2>文字を直す</h2>
@@ -377,7 +402,7 @@
 <script>
 'use strict';
 
-const VERSION = '2026-11-04c';
+const VERSION = '2026-11-04d';
 
 /* ===== 外部ライブラリ =====
  * 文字の読み取り（OCR）は Tesseract.js、単語の区切りと読みがなは kuromoji.js。
@@ -1150,6 +1175,7 @@ async function shoot() {
   log(`撮影: ${crop.width}×${crop.height}（${vert ? '縦' : '横'}・${SET.dict}）`);
   const t0 = performance.now();
   openSheet();
+  showCrop(crop, vert);
   sheetStatus('読み取り中…', 0);
   OCR.onProgress = m => {
     if (shot !== S.shot) return;
@@ -1187,6 +1213,7 @@ function openSheet() {
   $('controls').hidden = true;
   $('chips').hidden = true;
   $('raw').hidden = true;
+  showCrop(null);
   renderKanjiSeg();
   renderStatus();
 }
@@ -1194,12 +1221,23 @@ function openSheet() {
 function closeSheet(restart = true) {
   S.shot++;
   $('sheet').hidden = true;
+  showCrop(null);
   $('controls').hidden = false;
   renderStatus();
   if (Cam.mode === 'video') {
     Cam.unfreeze();
     if (restart && S.view === 'scan') Cam.start();
   }
+}
+
+// 読み取りに渡した画像（点線のあいだを切り出して整えたもの）をシートの端に出す。null で消す。
+// シートに隠れる帯の下のほうに何が写っていたか、1行が帯に収まっていたか、ぼけていないかを確かめられる
+function showCrop(canvas, vert) {
+  const box = $('cropBox');
+  box.querySelector('canvas')?.remove();
+  box.hidden = !canvas;
+  $('sheetBody').className = canvas ? (vert ? 'v' : 'h') : '';
+  if (canvas) box.append(canvas);
 }
 
 // progress: 0〜1 で進み具合の棒、null は棒を動かさない、undefined はくるくると棒を消す（結果の文）
@@ -1819,6 +1857,14 @@ function init() {
     renderChips();
     renderStrip();
   }));
+
+  $('cropBox').addEventListener('click', () => {
+    const c = $('cropBox').querySelector('canvas');
+    if (!c) return;
+    $('cropBigImg').src = c.toDataURL('image/png');
+    $('cropBig').hidden = false;
+  });
+  $('cropBig').addEventListener('click', () => { $('cropBig').hidden = true; });
 
   $('editCancel').addEventListener('click', closeEditor);
   $('editForm').addEventListener('submit', async e => {
