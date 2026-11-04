@@ -383,7 +383,7 @@
 <div id="cropBig" class="modal" hidden>
   <figure>
     <img id="cropBigImg" alt="読み取った範囲">
-    <figcaption>点線のあいだを切り出して、読み取りやすく整えた画像です。この画像の文字を読み取りました。タップで閉じます。</figcaption>
+    <figcaption>点線のあいだを切り出した画像です。この画像の文字を読み取りました。タップで閉じます。</figcaption>
   </figure>
 </div>
 
@@ -407,14 +407,19 @@
 <script>
 'use strict';
 
-const VERSION = '2026-11-04e';
+const VERSION = '2026-11-04f';
 
 /* ===== 外部ライブラリ =====
- * 文字の読み取り（OCR）は Tesseract.js、単語の区切りと読みがなは kuromoji.js。
- * どちらも使うときに CDN から読み込む（初回だけ合わせて約 25MB。あとはブラウザのキャッシュから）。
+ * 文字の読み取り（OCR）は国立国会図書館の NDLOCR-Lite（onnxruntime-web で動かす）、
+ * 使えないときの予備に Tesseract.js。単語の区切りと読みがなは kuromoji.js。
+ * どれも使うときに読み込む（初回だけ合わせて約 65MB。あとはブラウザのキャッシュ・Cache Storage から）。
  * 写真は端末の中だけで読み取り、外へ送るのは調べることばだけ。
  */
+const NDL_REPO = 'https://raw.githubusercontent.com/ndl-lab/ndlocr-lite/e57f7c6bd9cfb3de5f12f008e71ad2122bd44bfd';
 const LIB = {
+  ort: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/',
+  ndlModel: `${NDL_REPO}/src/model/parseq-ndl-24x256-30-tiny-189epoch-tegaki3-r8data-202604.onnx`,
+  ndlChars: 'ndl-chars.json',   // 同じ版の src/config/NDLmoji.yaml の charset_train を JSON にしたもの
   tesseract: 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js',
   kuromoji: 'https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/build/kuromoji.js',
   kuromojiDict: 'https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/',
@@ -551,7 +556,6 @@ function setDict(d) {
   updateDir();
   if (!changed) return;
   if (S.view === 'dict' && S.cur) openWord(S.cur.w, { r: S.cur.r });
-  if (S.view === 'scan' && S.preloaded) OCR.preload();
 }
 
 /* ===== カメラ =====
@@ -756,7 +760,8 @@ function camMessage(msg, retry = 'もう一度') {
 // カメラの下に出す、いま何をしているかの短い表示
 function renderStatus() {
   const msg = Cam.starting && Cam.mode === 'video' ? 'カメラを起動中…'
-    : S.libsLoading ? '文字を読む準備中…（初回のみ・約25MB）' : '';
+    : S.libsLoading && NDL.progress != null ? `文字を読む辞書を読み込み中… ${Math.round(NDL.progress * 100)}%（初回のみ）`
+    : S.libsLoading ? '文字を読む準備中…（初回のみ・約65MB）' : '';
   $('camStatus').textContent = msg;
   $('camStatus').hidden = !msg || !$('camMsg').hidden || !$('sheet').hidden;
 }
@@ -769,9 +774,11 @@ function preloadAll() {
   renderStatus();
   const t0 = performance.now();
   log('準備: 文字の読み取りと区切りの辞書を読み込む');
+  NDL.onProgress ||= renderStatus;
   Promise.allSettled([
     getTokenizer().then(() => log(`準備: 区切りの辞書 OK（${sec(t0)}）`)),
-    OCR.get(OCR.langsFor(SET.vert[SET.dict], SET.dict)).then(() => log(`準備: 文字の読み取り OK（${sec(t0)}）`)),
+    // NDLOCR-Lite が使えなければ、予備の Tesseract を読み込んでおく
+    NDL.init().then(() => log(`準備: 文字の読み取り OK（${sec(t0)}）`), e => { OCR.preload(); throw e; }),
   ]).then(rs => {
     rs.filter(r => r.status === 'rejected').forEach(r => log(`準備: 失敗 ${r.reason?.message || r.reason}`));
     S.libsLoading = false;
@@ -865,8 +872,8 @@ function updateHint() {
     : `先頭の文字を ${SET.vert[SET.dict] ? '▼' : '▶'} に合わせて撮ってください`;
 }
 
-// 点線のあいだを切り出して、読み取りやすく整える
-const OCR_THICK = 150;      // 読み取りに渡す画像の、行の太さ方向の大きさ（px）
+// 点線のあいだを、写真の色のまま切り出す（行の太さ方向を RAW_THICK px ほどにそろえる）
+const RAW_THICK = 160;
 function cropBand(src, vert) {
   const cam = $('cam'), W = cam.clientWidth, H = cam.clientHeight, v = Cam.view;
   if (!BAND) return null;
@@ -882,14 +889,27 @@ function cropBand(src, vert) {
   y0 = clamp(y0, 0, src.h); y1 = clamp(y1, 0, src.h);
   const sw = x1 - x0, sh = y1 - y0;
   if (sw < 8 || sh < 8) return null;
-  const k = clamp(OCR_THICK / (vert ? sw : sh), 0.3, 4);
-  const w = Math.round(sw * k), h = Math.round(sh * k);
+  const k = clamp(RAW_THICK / (vert ? sw : sh), 0.2, 3);
+  const c = document.createElement('canvas');
+  c.width = Math.round(sw * k);
+  c.height = Math.round(sh * k);
+  const g = c.getContext('2d');
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(src.el, x0, y0, sw, sh, 0, 0, c.width, c.height);
+  return c;
+}
+
+// Tesseract 用（予備）: 行の太さを OCR_THICK にそろえ、白黒にして影や照明のむらをならす
+const OCR_THICK = 150;
+function tesseractInput(raw, vert) {
+  const k = OCR_THICK / (vert ? raw.width : raw.height);
+  const w = Math.round(raw.width * k), h = Math.round(raw.height * k);
   const c = document.createElement('canvas');
   c.width = w;
   c.height = h;
   const g = c.getContext('2d', { willReadFrequently: true });
   g.imageSmoothingQuality = 'high';
-  g.drawImage(src.el, x0, y0, sw, sh, 0, 0, w, h);
+  g.drawImage(raw, 0, 0, w, h);
   enhance(g, w, h);
   // まわりに白い余白を付ける（文字が端に接していると読み取りにくい）
   const pad = Math.round(OCR_THICK * 0.2), out = document.createElement('canvas');
@@ -952,7 +972,181 @@ function enhance(g, w, h) {
   g.putImageData(img, 0, 0);
 }
 
-/* ===== 文字の読み取り（Tesseract.js） =====
+/* ===== 文字の読み取り（NDLOCR-Lite） =====
+ * 国立国会図書館の NDLOCR-Lite（CC BY 4.0）の文字列認識モデル（PARSeq、ONNX 約36MB）を、
+ * onnxruntime-web で Worker の中で動かす。本の文字に強く、Tesseract が読み違える「所謂」「哲学」なども読める。
+ * 1行の画像を 256×24 に縮めて読む（縦書きは左へ 90° 回して横にする。NDLOCR-Lite の parseq.py と同じ）。30字まで。
+ * 白黒に整えると逆に崩れるので、写真の色のまま渡す。
+ * モデルは初回に読み込んで Cache Storage に保存し、次からはそこから使う。
+ * 使えないとき（読み込めない、Worker で動かない など）は、この起動のあいだは Tesseract.js で読む。
+ */
+const NDL_W = 256, NDL_H = 24;
+const NDL = {
+  ready: null,
+  worker: null,
+  chars: null,       // 出力の番号 → 文字（0 は終わりの印なので、番号 n は chars[n - 1]）
+  progress: null,    // モデルの読み込みの進み具合 0〜1（読み込み中でなければ null）
+  broken: false,     // 使えなかった（この起動のあいだは Tesseract で読む）
+  onProgress: null,
+  waiting: new Map(),
+  seq: 0,
+
+  init() {
+    return this.ready ||= new Promise((resolve, reject) => {
+      const t0 = performance.now();
+      log('NDLOCR-Lite: 準備');
+      const url = URL.createObjectURL(new Blob([ndlWorkerSource()], { type: 'text/javascript' }));
+      let w = null;
+      const fail = err => {
+        w?.terminate();
+        URL.revokeObjectURL(url);
+        this.waiting.forEach(cb => cb.reject(err));
+        this.waiting.clear();
+        this.worker = null;
+        this.progress = null;
+        this.broken = true;
+        log(`NDLOCR-Lite: 使えない（${err.message}）`);
+        this.onProgress?.();
+        reject(err);
+      };
+      try {
+        w = new Worker(url);
+      } catch (e) {
+        fail(e);
+        return;
+      }
+      w.onmessage = e => {
+        const d = e.data;
+        if (d.type === 'progress') {
+          this.progress = d.p;
+          this.onProgress?.();
+        } else if (d.type === 'ready') {
+          URL.revokeObjectURL(url);
+          this.worker = w;
+          this.progress = null;
+          log(`NDLOCR-Lite: OK（モデル${d.cached ? 'は保存済み' : 'を読み込み'} ${d.load}ms・準備 ${d.init}ms・計 ${sec(t0)}）`);
+          this.onProgress?.();
+          resolve();
+        } else if (d.id == null) {
+          fail(new Error(d.error));
+        } else {
+          const cb = this.waiting.get(d.id);
+          this.waiting.delete(d.id);
+          if (d.type === 'error') cb?.reject(new Error(d.error));
+          else cb?.resolve(d);
+        }
+      };
+      w.onerror = e => {
+        e.preventDefault();
+        fail(new Error(e.message || 'Worker で動きませんでした'));
+      };
+      fetch(LIB.ndlChars)
+        .then(r => {
+          if (!r.ok) throw new Error(`文字の一覧を読み込めませんでした（HTTP ${r.status}）`);
+          return r.json();
+        })
+        .then(list => {
+          this.chars = list;
+          w.postMessage({ type: 'init', model: LIB.ndlModel });
+        }, fail);
+    });
+  },
+
+  // canvas: 点線のあいだを色のまま切り出したもの → { text, full（30字で切れたかもしれない）}
+  async read(canvas, vert) {
+    if (this.broken) throw new Error('この起動では使えません');
+    await this.init();
+    const x = ndlInput(canvas, vert);
+    const d = await new Promise((resolve, reject) => {
+      const id = ++this.seq;
+      this.waiting.set(id, { resolve, reject });
+      this.worker.postMessage({ type: 'read', id, x, w: NDL_W, h: NDL_H }, [x.buffer]);
+    });
+    log(`NDLOCR-Lite: 読み取り ${d.ms}ms`);
+    return { text: d.ids.map(i => this.chars[i - 1] ?? '').join(''), full: d.full };
+  },
+};
+
+// 縦書きは左へ 90° 回して横にし、256×24 に縮め、RGB を -1〜1 にした CHW の並びにする
+function ndlInput(src, vert) {
+  const r = document.createElement('canvas');
+  r.width = vert ? src.height : src.width;
+  r.height = vert ? src.width : src.height;
+  const rg = r.getContext('2d');
+  if (vert) {
+    rg.translate(0, r.height);
+    rg.rotate(-Math.PI / 2);
+  }
+  rg.drawImage(src, 0, 0);
+  const c = document.createElement('canvas');
+  c.width = NDL_W;
+  c.height = NDL_H;
+  const g = c.getContext('2d', { willReadFrequently: true });
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(r, 0, 0, NDL_W, NDL_H);
+  const d = g.getImageData(0, 0, NDL_W, NDL_H).data, n = NDL_W * NDL_H, x = new Float32Array(3 * n);
+  for (let i = 0; i < n; i++) for (let ch = 0; ch < 3; ch++) x[ch * n + i] = d[i * 4 + ch] / 127.5 - 1;
+  return x;
+}
+
+// Worker の中身。モデルは Cache Storage に保存して、次からはそこから読む
+function ndlWorkerSource() {
+  return `importScripts(${JSON.stringify(`${LIB.ort}ort.min.js`)});
+ort.env.wasm.wasmPaths = ${JSON.stringify(LIB.ort)};
+ort.env.wasm.numThreads = 1;
+let session = null;
+async function loadModel(url) {
+  let cache = null;
+  try { cache = await caches.open('camjisho-ndl'); } catch (e) {}
+  const hit = cache && await cache.match(url);
+  if (hit) return { buf: new Uint8Array(await hit.arrayBuffer()), cached: true };
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('モデルを読み込めませんでした（HTTP ' + res.status + '）');
+  const total = +res.headers.get('content-length') || 0, parts = [];
+  let loaded = 0, last = 0;
+  const reader = res.body.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    parts.push(value);
+    loaded += value.length;
+    if (total && loaded - last > 1048576) { last = loaded; postMessage({ type: 'progress', p: loaded / total }); }
+  }
+  const buf = new Uint8Array(loaded);
+  let at = 0;
+  for (const p of parts) { buf.set(p, at); at += p.length; }
+  if (cache) await cache.put(url, new Response(buf)).catch(() => {});
+  return { buf, cached: false };
+}
+onmessage = async e => {
+  const d = e.data;
+  try {
+    if (d.type === 'init') {
+      const t0 = performance.now();
+      const { buf, cached } = await loadModel(d.model);
+      const t1 = performance.now();
+      session = await ort.InferenceSession.create(buf, { executionProviders: ['wasm'] });
+      postMessage({ type: 'ready', cached, load: Math.round(t1 - t0), init: Math.round(performance.now() - t1) });
+    } else if (d.type === 'read') {
+      const t0 = performance.now();
+      const out = (await session.run({ [session.inputNames[0]]: new ort.Tensor('float32', d.x, [1, 3, d.h, d.w]) }))[session.outputNames[0]];
+      const T = out.dims[1], C = out.dims[2], ids = [];
+      for (let t = 0; t < T; t++) {
+        let best = 0, top = -Infinity;
+        for (let k = 0; k < C; k++) { const v = out.data[t * C + k]; if (v > top) { top = v; best = k; } }
+        if (best === 0) break;
+        ids.push(best);
+      }
+      postMessage({ type: 'result', id: d.id, ids, full: ids.length >= T, ms: Math.round(performance.now() - t0) });
+    }
+  } catch (err) {
+    postMessage({ type: 'error', id: d.id, error: String((err && err.message) || err) });
+  }
+};`;
+}
+
+/* ===== 文字の読み取り（Tesseract.js、予備） =====
+ * NDLOCR-Lite が使えないときに使う。
  * 縦書きは jpn_vert、横書きは jpn（英和・和英では eng+jpn）。言語の辞書は初回だけ各 2〜3MB を読み込む。
  */
 const OCR = {
@@ -1028,7 +1222,8 @@ const JP_GAP = new RegExp(`([${JP}])\\s+(?=[${JP}])`, 'gu');
 function cleanText(t, vert) {
   t = t.normalize('NFKC').replace(/[|｜_]+/g, ' ');
   t = vert ? t.replace(/\s*\n\s*/g, '') : t.replace(/\s*\n\s*/g, ' ');
-  return t.replace(JP_GAP, '$1').replace(/[ \t]{2,}/g, ' ').trim();
+  // 帯の端のかすれを読んだ「-」などは落とす
+  return t.replace(JP_GAP, '$1').replace(/[ \t]{2,}/g, ' ').replace(/^[\s\-–—_~]+|[\s\-–—_~]+$/g, '');
 }
 
 /* ===== 単語の区切りと読みがな（kuromoji.js） =====
@@ -1170,18 +1365,22 @@ async function shoot() {
     return;
   }
   const vert = SET.vert[SET.dict];
-  const crop = cropBand(src, vert);
-  if (!crop) {
+  const raw = cropBand(src, vert);
+  if (!raw) {
     toast('点線のあいだに写真が入っていません');
     return;
   }
   if (Cam.mode === 'video') Cam.freeze();
   const shot = ++S.shot;
-  log(`撮影: ${crop.width}×${crop.height}（${vert ? '縦' : '横'}・${SET.dict}）`);
+  log(`撮影: ${raw.width}×${raw.height}（${vert ? '縦' : '横'}・${SET.dict}）`);
   const t0 = performance.now();
   openSheet();
-  showCrop(crop, vert);
-  sheetStatus('読み取り中…', 0);
+  showCrop(raw, vert);
+  sheetStatus('読み取り中…', null);
+  NDL.onProgress = () => {
+    renderStatus();
+    if (shot === S.shot && NDL.progress != null) sheetStatus('文字を読む辞書を読み込み中…（初回のみ・約36MB）', NDL.progress);
+  };
   OCR.onProgress = m => {
     if (shot !== S.shot) return;
     if (m.status === 'recognizing text') sheetStatus('読み取り中…', m.progress);
@@ -1189,10 +1388,22 @@ async function shoot() {
     else sheetStatus('読み取りの準備中…', null);
   };
   try {
-    const data = await OCR.read(crop, vert, SET.dict);
+    let text, how;
+    try {
+      const r = await NDL.read(raw, vert);
+      text = r.text;
+      how = r.full ? 'NDLOCR-Lite・30字で切れたかも' : 'NDLOCR-Lite';
+    } catch (e) {
+      if (shot !== S.shot) return;
+      log(`撮影: NDLOCR-Lite で読めない（${e?.message || e}）→ Tesseract で読む`);
+      sheetStatus('読み取り中…', 0);
+      const data = await OCR.read(tesseractInput(raw, vert), vert, SET.dict);
+      text = data.text || '';
+      how = `Tesseract・確信度 ${Math.round(data.confidence ?? 0)}`;
+    }
     if (shot !== S.shot) return;
-    const text = cleanText(data.text || '', vert);
-    log(`撮影: 「${text}」 確信度 ${Math.round(data.confidence ?? 0)}（${sec(t0)}）`);
+    text = cleanText(text, vert);
+    log(`撮影: 「${text}」（${how}・${sec(t0)}）`);
     sheetStatus('ことばに区切っています…', null);
     await setText(text);
     if (shot !== S.shot) return;
@@ -1654,6 +1865,8 @@ function renderDictEmpty() {
   const recent = HIST.slice(0, 12);
   $('dBody').innerHTML = `<div class="empty"><h2>ことばを調べる</h2>
     <p>「スキャン」で本の文字を撮るか、下の欄にことばを入れてください。上で辞書を切り替えられます。</p>
+    <p class="src" style="margin-top:12px">文字の読み取り: <a href="https://github.com/ndl-lab/ndlocr-lite" target="_blank" rel="noopener">NDLOCR-Lite</a>（国立国会図書館、CC BY 4.0）。
+    辞書: ウィクショナリー・Wikipedia（CC BY-SA 4.0）</p>
     ${recent.length ? `<div class="recent">${recent.map(h => `<button class="chip" data-word="${esc(h.w)}" data-r="${esc(h.r)}"><span class="r">${esc(h.r)}</span><span class="b">${esc(h.w)}</span></button>`).join('')}</div>` : ''}</div>`;
 }
 
@@ -1835,7 +2048,6 @@ function init() {
     SET.vert[SET.dict] = !SET.vert[SET.dict];
     saveSet();
     updateDir();
-    if (S.preloaded) OCR.preload();
   });
   const pickPhoto = () => $('file').click();
   $('btnPhoto').addEventListener('click', pickPhoto);
