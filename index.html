@@ -109,8 +109,19 @@
   @keyframes up{from{transform:translateY(24px); opacity:0}}
   .sheet-head{flex:none; display:flex; align-items:center; gap:8px}
   .sheet-title{flex:1; display:flex; align-items:center; gap:6px; font-size:17px; font-weight:800}
-  #raw{flex:none; display:block; width:100%; margin-top:8px; padding:6px 10px; border-radius:10px; text-align:left;
-       background:var(--soft); color:var(--sub); font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  /* 読み取った文字。1字ずつタップ（なぞる）で選び、選んだ所を Google で検索する */
+  #rawBox{flex:none; margin-top:8px; padding:6px 10px 8px; border-radius:12px; background:var(--soft)}
+  .raw-cap{font-size:12px; font-weight:700; color:var(--sub)}
+  .raw-cap span{margin-left:4px; font-weight:600; color:var(--faint)}
+  #rawText{display:flex; flex-wrap:wrap; max-height:5.2em; overflow:auto; margin-top:2px; font-size:21px; line-height:1.55; color:var(--ink);
+           cursor:pointer; touch-action:none; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none}
+  #rawText span{padding:0 1px}
+  #rawText span.sp{min-width:.35em}
+  #rawText span.sel{background:var(--accent); color:var(--accent-ink)}
+  #selBar{display:flex; align-items:center; gap:4px; margin-top:6px}
+  #selSearch{flex:1; min-width:0; display:flex; align-items:center; gap:6px; height:40px; padding:0 14px; border-radius:20px;
+             background:var(--accent); color:var(--accent-ink); font-size:15px; font-weight:700; text-decoration:none}
+  #selSearch span{white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
   /* 読み取った範囲（左に縦長、横書きは上に横長）と、ことばの一覧 */
   #sheetBody{flex:1; min-height:0; display:flex; gap:12px; margin-top:10px}
   #sheetBody.h{flex-direction:column; gap:8px}
@@ -133,9 +144,8 @@
   .sheet-msg{padding:20px 4px; color:var(--sub); font-size:15px}
   .sheet-msg .bar{height:4px; margin-top:12px; border-radius:2px; background:var(--soft); overflow:hidden}
   .sheet-msg .bar i{display:block; height:100%; width:0; background:var(--accent); transition:width .2s}
-  .sheet-foot{flex:none; display:flex; align-items:center; justify-content:space-between; padding-top:6px}
+  .sheet-foot{flex:none; display:flex; align-items:center; justify-content:center; padding-top:6px}
   .tbtn{height:44px; padding:0 14px; display:flex; align-items:center; gap:6px; border-radius:22px; font-weight:700; color:var(--sub)}
-  .tbtn.line{border:1.5px solid var(--accent); color:var(--accent)}
   .tbtn:active{background:var(--soft)}
 
   .spin{display:inline-block; width:16px; height:16px; margin-right:8px; vertical-align:-3px; border-radius:50%;
@@ -191,7 +201,7 @@
   .split .chip .b{font-size:1.15em}
   .links{display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:.6em 0 1.2em; font-size:15px}
   .links span{flex-basis:100%; color:var(--sub); font-size:13px; font-weight:600}
-  .links a{display:inline-flex; align-items:center; height:36px; padding:0 14px; border-radius:18px; border:1.5px solid var(--accent);
+  .links a{display:inline-flex; align-items:center; gap:6px; height:36px; padding:0 14px; border-radius:18px; border:1.5px solid var(--accent);
            color:var(--link); font-weight:700; text-decoration:none}
   .links a:active{background:var(--accent-soft)}
   .links.big a{height:44px; padding:0 18px; background:var(--accent); color:var(--accent-ink)}
@@ -239,17 +249,9 @@
   #tabs button{display:flex; flex-direction:column; align-items:center; gap:1px; padding:5px 0 4px; border-radius:14px; font-size:12px; font-weight:700; color:var(--sub)}
   #tabs button.on{background:var(--soft); color:var(--ink)}
 
-  /* ---- 文字を直す ---- */
+  /* ---- 読んだ範囲を大きく見る ---- */
   .modal{position:fixed; inset:0; z-index:10; display:flex; align-items:flex-start; justify-content:center;
          padding:calc(40px + env(safe-area-inset-top)) 16px 16px; background:rgba(0,0,0,.4)}
-  .modal-card{width:100%; max-width:520px; padding:18px; border-radius:20px; background:var(--card); box-shadow:var(--shadow)}
-  .modal-card h2{font-size:18px}
-  .modal-sub{margin-top:2px; font-size:13px; color:var(--sub)}
-  #editText{display:block; width:100%; margin-top:12px; padding:10px 12px; border-radius:12px; border:1px solid var(--line);
-            background:var(--bg); color:var(--ink); font:inherit; font-size:18px; resize:vertical}
-  .modal-btns{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:14px}
-  .btn{height:44px; padding:0 12px; border-radius:22px; background:var(--soft); font-weight:700}
-  .btn.primary{grid-column:1 / -1; order:-1; background:var(--accent); color:var(--accent-ink)}
 
   #debugLog{position:fixed; left:4px; right:4px; top:calc(4px + env(safe-area-inset-top)); z-index:30; max-height:38vh; overflow:auto;
             padding:6px 8px; border-radius:8px; background:rgba(0,0,0,.8); color:#a6f3a6; font:11px/1.4 ui-monospace,Menlo,monospace; white-space:pre-wrap}
@@ -270,7 +272,6 @@
   <symbol id="i-light" viewBox="0 0 24 24"><path d="M13 3L6 13.5h5.2L10 21l7-10.5h-5.2z"/></symbol>
   <symbol id="i-photo" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17.5l5-4.5 4 3.5 3-2.5 4 3.5"/></symbol>
   <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
-  <symbol id="i-pen" viewBox="0 0 24 24"><path d="M4 20l1.2-4.6L15.8 4.8l3.4 3.4L8.6 18.8z"/><path d="M13.6 7l3.4 3.4"/></symbol>
   <symbol id="i-dir" viewBox="0 0 24 24"><path d="M4 8h14l-3-3M20 16H6l3 3"/></symbol>
   <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
 </svg>
@@ -317,7 +318,14 @@
               <button data-kanji="1">漢字のみ</button>
             </div>
           </div>
-          <button id="raw" hidden></button>
+          <div id="rawBox" hidden>
+            <div class="raw-cap">読み取った文字<span id="rawHint">タップで選ぶと Google で検索できます</span></div>
+            <div id="rawText" role="group" aria-label="読み取った文字"></div>
+            <div id="selBar" hidden>
+              <a id="selSearch" target="_blank" rel="noopener"><svg class="ic"><use href="#i-search"/></svg><span id="selLabel"></span></a>
+              <button id="selClear" class="ibtn" aria-label="選ぶのをやめる"><svg class="ic"><use href="#i-close"/></svg></button>
+            </div>
+          </div>
           <div id="sheetBody">
             <button id="cropBox" hidden aria-label="読み取った範囲を大きく見る"><span>読んだ範囲</span></button>
             <div id="sheetMain">
@@ -327,7 +335,6 @@
           </div>
           <div class="sheet-foot">
             <button id="sheetClose" class="tbtn"><svg class="ic"><use href="#i-close"/></svg>閉じる</button>
-            <button id="sheetEdit" class="tbtn line"><svg class="ic"><use href="#i-pen"/></svg>編集</button>
           </div>
         </div>
       </div>
@@ -387,19 +394,6 @@
   </figure>
 </div>
 
-<div id="editor" class="modal" hidden>
-  <form class="modal-card" id="editForm">
-    <h2>文字を直す</h2>
-    <p class="modal-sub">読み取りの間違いを直したり、調べたいことばを入れたりできます。</p>
-    <textarea id="editText" rows="3" autocapitalize="off" spellcheck="false"></textarea>
-    <div class="modal-btns">
-      <button type="button" class="btn" id="editCancel">やめる</button>
-      <button type="button" class="btn" id="editWhole">このまま調べる</button>
-      <button type="submit" class="btn primary">区切って表示</button>
-    </div>
-  </form>
-</div>
-
 <input type="file" id="file" accept="image/*" hidden>
 <div id="toast" hidden></div>
 <div id="debugLog" hidden></div>
@@ -407,7 +401,7 @@
 <script>
 'use strict';
 
-const VERSION = '2026-11-04f';
+const VERSION = '2026-11-17a';
 
 /* ===== 外部ライブラリ =====
  * 文字の読み取り（OCR）は国立国会図書館の NDLOCR-Lite（onnxruntime-web で動かす）、
@@ -1408,7 +1402,7 @@ async function shoot() {
     await setText(text);
     if (shot !== S.shot) return;
     if (!S.tokens.length) {
-      sheetStatus(`読み取れませんでした。${vert ? '縦' : '横'}の1行が点線のあいだに収まるように、ズームで大きさを合わせて撮ってください。「編集」で入力もできます。`, undefined);
+      sheetStatus(`読み取れませんでした。${vert ? '縦' : '横'}の1行が点線のあいだに収まるように、ズームで大きさを合わせて撮ってください。`, undefined);
     }
   } catch (e) {
     log(`撮影: 失敗 ${e?.message || e}`);
@@ -1420,6 +1414,7 @@ async function shoot() {
 async function setText(text) {
   S.text = text;
   S.tokens = text ? await toTokens(text) : [];
+  renderRaw();
   renderChips();
   renderStrip();
 }
@@ -1428,7 +1423,7 @@ function openSheet() {
   $('sheet').hidden = false;
   $('controls').hidden = true;
   $('chips').hidden = true;
-  $('raw').hidden = true;
+  $('rawBox').hidden = true;
   showCrop(null);
   renderKanjiSeg();
   renderStatus();
@@ -1473,8 +1468,6 @@ function chipHtml(t) {
 }
 function renderChips() {
   const list = visibleTokens();
-  $('raw').hidden = !S.text;
-  $('raw').textContent = `読み取った文字: ${S.text}`;
   if (!S.tokens.length) return;
   $('sheetMsg').hidden = true;
   $('chips').hidden = false;
@@ -1484,14 +1477,59 @@ function renderKanjiSeg() {
   document.querySelectorAll('#kanjiSeg button').forEach(b => b.classList.toggle('on', (b.dataset.kanji === '1') === SET.kanjiOnly));
 }
 
-/* ===== 文字を直す ===== */
-function openEditor(text) {
-  $('editText').value = text;
-  $('editor').hidden = false;
-  setTimeout(() => $('editText').focus(), 50);
+/* ===== 読み取った文字を選んで Google で検索する =====
+ * 1字ずつタップできるように並べる。1字目をタップしてから2字目をタップすると、そのあいだを選ぶ（なぞっても選べる）。
+ * 選んだ1字をもう一度タップすると選ぶのをやめる。選んだ文字は、そのまま Google で検索できる
+ */
+const SEL = { a: -1, b: -1, drag: false };   // a: 選びはじめの字、b: 選び終わりの字（どちらが前でもよい）
+
+function renderRaw() {
+  $('rawBox').hidden = !S.text;
+  $('rawText').innerHTML = [...S.text].map((c, i) => `<span data-i="${i}"${/\s/.test(c) ? ' class="sp"' : ''}>${esc(c)}</span>`).join('');
+  SEL.a = SEL.b = -1;
+  renderSel();
 }
-function closeEditor() {
-  $('editor').hidden = true;
+
+function selText() {
+  if (SEL.a < 0) return '';
+  return [...S.text].slice(Math.min(SEL.a, SEL.b), Math.max(SEL.a, SEL.b) + 1).join('').trim();
+}
+
+function renderSel() {
+  const lo = Math.min(SEL.a, SEL.b), hi = Math.max(SEL.a, SEL.b);
+  $('rawText').querySelectorAll('span').forEach(el => {
+    const i = +el.dataset.i;
+    el.classList.toggle('sel', SEL.a >= 0 && i >= lo && i <= hi);
+  });
+  const t = selText();
+  $('selBar').hidden = !t;
+  $('rawHint').hidden = !!t;
+  if (!t) return;
+  $('selLabel').textContent = `「${t}」を Google で検索`;
+  $('selSearch').href = `https://www.google.com/search?q=${encodeURIComponent(t)}`;
+}
+
+function onRawDown(e) {
+  const el = e.target.closest('#rawText span');
+  if (!el) return;
+  const i = +el.dataset.i;
+  if (SEL.a >= 0 && SEL.a === SEL.b && i !== SEL.a) SEL.b = i;   // 2字目のタップで、そのあいだを選ぶ
+  else if (SEL.a === i && SEL.b === i) SEL.a = SEL.b = -1;        // 選んだ1字をもう一度タップで、やめる
+  else SEL.a = SEL.b = i;
+  SEL.drag = SEL.a >= 0;
+  if (SEL.drag) $('rawText').setPointerCapture(e.pointerId);
+  renderSel();
+}
+function onRawMove(e) {
+  if (!SEL.drag) return;
+  const el = document.elementFromPoint(e.clientX, e.clientY)?.closest('#rawText span');
+  if (el && +el.dataset.i !== SEL.b) {
+    SEL.b = +el.dataset.i;
+    renderSel();
+  }
+}
+function onRawUp() {
+  SEL.drag = false;
 }
 
 /* ===== 辞書を引く =====
@@ -1901,19 +1939,24 @@ function renderWiki(wp) {
     <p><a href="${esc(url)}" target="_blank" rel="noopener">Wikipedia で${more ? '続きを' : ''}読む</a></p></section>`;
 }
 
-/* ほかの辞書・Web で調べるリンク。
- * コトバンク・Weblio は市販の辞書を収録していて、ウィクショナリーより語数がずっと多い（下学・雑話 など）。
- * ただし内容はアプリに取り込めない（ブラウザから読めず、規約上も）ので、そのことばのページを開くリンクだけ出す。
- * コトバンクは載っていない語だと直接のページが 404 になるので、検索のページを開く。
- * big: 辞書に見つからなかったときに目立たせる
+/* ほかの辞書・Google で調べるリンク。
+ * 見つかったとき: 「ほかで調べる」として、コトバンク・Weblio（市販の辞書を収録していて語数が多い）と Google を小さく出す。
+ *   内容はアプリに取り込めない（ブラウザから読めず、規約上も）ので、そのことばのページを開くだけ。
+ *   コトバンクは載っていない語だと直接のページが 404 になるので、検索のページを開く。
+ * 辞書（ウィクショナリー）に語義がなかったとき（notFound）: Google で検索のボタンだけを大きく出す。
  */
-function moreLinks(word, big) {
-  const e = encodeURIComponent(word), links = [];
+function moreLinks(word, notFound) {
+  const e = encodeURIComponent(word);
+  const q = SET.dict === 'wiki' ? word : SET.dict === 'en' && !isLatin(word) ? `${word} 英語` : `${word} 意味`;
+  const google = `https://www.google.com/search?q=${encodeURIComponent(q)}`;
+  if (notFound) {
+    return `<div class="links big"><a href="${esc(google)}" target="_blank" rel="noopener"><svg class="ic"><use href="#i-search"/></svg>「${esc(word)}」を Google で検索</a></div>`;
+  }
+  const links = [];
   if (SET.dict === 'ja') links.push(['コトバンク', `https://kotobank.jp/search?q=${e}`], ['Weblio', `https://www.weblio.jp/content/${e}`]);
   if (SET.dict === 'en') links.push(['Weblio 英和・和英', `https://ejje.weblio.jp/content/${e}`]);
-  const q = SET.dict === 'wiki' ? word : SET.dict === 'en' && !isLatin(word) ? `${word} 英語` : `${word} 意味`;
-  links.push(['Web で検索', `https://www.google.com/search?q=${encodeURIComponent(q)}`]);
-  return `<div class="links${big ? ' big' : ''}">${big ? '' : '<span>ほかで調べる</span>'}${links.map(([name, url]) =>
+  links.push(['Google で検索', google]);
+  return `<div class="links"><span>ほかで調べる</span>${links.map(([name, url]) =>
     `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(name)}</a>`).join('')}</div>`;
 }
 
@@ -1927,11 +1970,10 @@ function renderResult(R) {
     else if (p.search) html.push(`<div class="hits">${p.search.map(h => `<button class="hit" data-word="${esc(h.title)}"><b>${esc(h.title)}</b><small>${esc(h.snippet)}</small></button>`).join('')}</div>`);
   }
   if (!R.parts.length) {
-    const more = { ja: 'コトバンクや Weblio（市販の国語辞典などを収録）なら載っていることがあります。', en: 'Weblio（英和・和英辞典を収録）なら載っていることがあります。' }[SET.dict] || '';
-    html.push(`<div class="empty"><h2>見つかりませんでした</h2><p>「${esc(R.word)}」は${SET.dict === 'wiki' ? 'Wikipedia' : 'ウィクショナリー'}に載っていません。${more}</p></div>`);
+    html.push(`<div class="empty"><h2>見つかりませんでした</h2><p>「${esc(R.word)}」は${SET.dict === 'wiki' ? 'Wikipedia' : 'ウィクショナリー'}に載っていません。</p></div>`);
   }
-  // 辞書（ウィクショナリー）の語義がなかったときは、ほかの辞書へのリンクを目立たせる
-  const noDict = SET.dict !== 'wiki' && !R.parts.some(p => p.blocks || p.kanji);
+  // 辞書（ウィクショナリー。Wiki では Wikipedia の記事）になかったときは、Google で検索のボタンを大きく出す
+  const noDict = SET.dict === 'wiki' ? !R.parts.some(p => p.wiki) : !R.parts.some(p => p.blocks || p.kanji);
   html.push(moreLinks(R.word, noDict));
   if (!R.parts.length && R.split?.length) html.push(`<p class="from">分けて調べる:</p><div class="split">${R.split.map(chipHtml).join('')}</div>`);
   if (R.src.length) {
@@ -2078,9 +2120,15 @@ function init() {
   new ResizeObserver(layoutFrame).observe(cam);
 
   $('sheetClose').addEventListener('click', () => closeSheet());
-  $('sheetEdit').addEventListener('click', () => openEditor(S.text));
-  $('raw').addEventListener('click', () => openEditor(S.text));
   $('chips').addEventListener('click', onWordClick);
+  $('rawText').addEventListener('pointerdown', onRawDown);
+  $('rawText').addEventListener('pointermove', onRawMove);
+  $('rawText').addEventListener('pointerup', onRawUp);
+  $('rawText').addEventListener('pointercancel', onRawUp);
+  $('selClear').addEventListener('click', () => {
+    SEL.a = SEL.b = -1;
+    renderSel();
+  });
   document.querySelectorAll('#kanjiSeg button').forEach(b => b.addEventListener('click', () => {
     SET.kanjiOnly = b.dataset.kanji === '1';
     saveSet();
@@ -2096,25 +2144,6 @@ function init() {
     $('cropBig').hidden = false;
   });
   $('cropBig').addEventListener('click', () => { $('cropBig').hidden = true; });
-
-  $('editCancel').addEventListener('click', closeEditor);
-  $('editForm').addEventListener('submit', async e => {
-    e.preventDefault();
-    const text = $('editText').value.trim();
-    closeEditor();
-    S.shot++;            // 読み取り中だったら、その結果は使わない
-    if (S.view === 'scan') {
-      if ($('sheet').hidden) openSheet();
-      sheetStatus('ことばに区切っています…', null);
-    }
-    await setText(text);
-    if (S.view === 'scan' && !S.tokens.length) sheetStatus('ことばがありません。', undefined);
-  });
-  $('editWhole').addEventListener('click', () => {
-    const text = $('editText').value.trim();
-    closeEditor();
-    if (text) openWord(text);
-  });
 
   $('dBody').addEventListener('click', onWordClick);
   $('strip').addEventListener('click', onWordClick);
