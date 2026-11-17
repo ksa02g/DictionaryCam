@@ -103,34 +103,36 @@
   #shutter:active{transform:scale(.94)}
 
   /* 撮ったあとのシート */
-  #sheet{position:absolute; left:8px; right:8px; bottom:8px; max-height:64%; display:flex; flex-direction:column;
-         padding:14px 16px 8px; border-radius:24px; background:var(--card); box-shadow:0 -4px 24px rgba(0,0,0,.28);
+  #sheet{position:absolute; left:8px; right:8px; bottom:8px; max-height:72%; display:flex; flex-direction:column;
+         padding:12px 14px 4px; border-radius:24px; background:var(--card); box-shadow:0 -4px 24px rgba(0,0,0,.28);
          animation:up .2s ease-out}
   @keyframes up{from{transform:translateY(24px); opacity:0}}
   .sheet-head{flex:none; display:flex; align-items:center; gap:8px}
   .sheet-title{flex:1; display:flex; align-items:center; gap:6px; font-size:17px; font-weight:800}
   /* 読み取った文字。1字ずつタップ（なぞる）で選び、選んだ所を Google で検索する */
-  #rawBox{flex:none; margin-top:8px; padding:6px 10px 8px; border-radius:12px; background:var(--soft)}
+  #rawBox{flex:none; margin-top:6px; padding:4px 10px 6px; border-radius:12px; background:var(--soft)}
   .raw-cap{font-size:12px; font-weight:700; color:var(--sub)}
   .raw-cap span{margin-left:4px; font-weight:600; color:var(--faint)}
-  #rawText{display:flex; flex-wrap:wrap; max-height:5.2em; overflow:auto; margin-top:2px; font-size:21px; line-height:1.55; color:var(--ink);
+  #rawText{display:flex; flex-wrap:wrap; max-height:4.2em; overflow:auto; font-size:17px; line-height:1.4; color:var(--ink);
            cursor:pointer; touch-action:none; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none}
   #rawText span{padding:0 1px}
   #rawText span.sp{min-width:.35em}
   #rawText span.sel{background:var(--accent); color:var(--accent-ink)}
-  #selBar{display:flex; align-items:center; gap:4px; margin-top:6px}
-  #selSearch{flex:1; min-width:0; display:flex; align-items:center; gap:6px; height:40px; padding:0 14px; border-radius:20px;
+  #selBar{display:flex; align-items:center; gap:4px; margin-top:4px}
+  #selBar .ibtn{width:38px; height:38px}
+  #selSearch{flex:1; min-width:0; display:flex; align-items:center; gap:6px; height:38px; padding:0 14px; border-radius:19px;
              background:var(--accent); color:var(--accent-ink); font-size:15px; font-weight:700; text-decoration:none}
   #selSearch span{white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
-  /* 読み取った範囲（左に縦長、横書きは上に横長）と、ことばの一覧 */
-  #sheetBody{flex:1; min-height:0; display:flex; gap:12px; margin-top:10px}
-  #sheetBody.h{flex-direction:column; gap:8px}
+  /* 読み取った範囲（縦書きは左に縦長、横書きは見出しの横に細い帯）と、ことばの一覧 */
+  #sheetBody{flex:1; min-height:0; display:flex; gap:12px; margin-top:8px}
+  #sheetBody.h{flex-direction:column; gap:6px}
   #sheetMain{flex:1; min-width:0; min-height:0; overflow:auto}
   #cropBox{flex:none; display:flex; flex-direction:column; align-items:center; gap:3px; color:var(--faint); font-size:10px; font-weight:700; cursor:zoom-in}
   #cropBox canvas{display:block; border:1px solid var(--line); border-radius:6px; background:#fff; object-fit:contain}
   #sheetBody.v #cropBox canvas{height:clamp(90px, 22vh, 170px); width:auto; max-width:64px}
-  #sheetBody.h #cropBox{align-items:stretch}
-  #sheetBody.h #cropBox canvas{width:100%; height:auto; max-height:64px}
+  #sheetBody.h #cropBox{flex-direction:row; gap:8px}
+  #sheetBody.h #cropBox span{flex:none}
+  #sheetBody.h #cropBox canvas{height:34px; width:auto; min-width:0; max-width:calc(100% - 5em)}
   #chips{padding:2px 0 6px; display:flex; flex-wrap:wrap; gap:8px; align-content:flex-start}
   #cropBig{align-items:center; justify-content:center; padding:16px; background:rgba(0,0,0,.88)}
   #cropBig figure{display:flex; flex-direction:column; align-items:center; gap:12px; max-width:100%}
@@ -144,8 +146,8 @@
   .sheet-msg{padding:20px 4px; color:var(--sub); font-size:15px}
   .sheet-msg .bar{height:4px; margin-top:12px; border-radius:2px; background:var(--soft); overflow:hidden}
   .sheet-msg .bar i{display:block; height:100%; width:0; background:var(--accent); transition:width .2s}
-  .sheet-foot{flex:none; display:flex; align-items:center; justify-content:center; padding-top:6px}
-  .tbtn{height:44px; padding:0 14px; display:flex; align-items:center; gap:6px; border-radius:22px; font-weight:700; color:var(--sub)}
+  .sheet-foot{flex:none; display:flex; align-items:center; justify-content:center; padding-top:2px}
+  .tbtn{height:40px; padding:0 14px; display:flex; align-items:center; gap:6px; border-radius:22px; font-weight:700; color:var(--sub)}
   .tbtn:active{background:var(--soft)}
 
   .spin{display:inline-block; width:16px; height:16px; margin-right:8px; vertical-align:-3px; border-radius:50%;
@@ -401,7 +403,7 @@
 <script>
 'use strict';
 
-const VERSION = '2026-11-17a';
+const VERSION = '2026-11-17b';
 
 /* ===== 外部ライブラリ =====
  * 文字の読み取り（OCR）は国立国会図書館の NDLOCR-Lite（onnxruntime-web で動かす）、
