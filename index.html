@@ -109,15 +109,11 @@
   @keyframes up{from{transform:translateY(24px); opacity:0}}
   .sheet-head{flex:none; display:flex; align-items:center; gap:8px}
   .sheet-title{flex:1; display:flex; align-items:center; gap:6px; font-size:17px; font-weight:800}
-  /* 読み取った文字。1字ずつタップ（なぞる）で選び、選んだ所を Google で検索する */
+  /* 読み取った文字。iPhone のふつうの選び方（長押し・つまみ）で選び、選んだ所を Google で検索する */
   #rawBox{flex:none; margin-top:6px; padding:4px 10px 6px; border-radius:12px; background:var(--soft)}
   .raw-cap{font-size:12px; font-weight:700; color:var(--sub)}
-  .raw-cap span{margin-left:4px; font-weight:600; color:var(--faint)}
-  #rawText{display:flex; flex-wrap:wrap; max-height:4.2em; overflow:auto; font-size:17px; line-height:1.4; color:var(--ink);
-           cursor:pointer; touch-action:none; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none}
-  #rawText span{padding:0 1px}
-  #rawText span.sp{min-width:.35em}
-  #rawText span.sel{background:var(--accent); color:var(--accent-ink)}
+  #rawText{max-height:4.2em; overflow:auto; font-size:17px; line-height:1.4; letter-spacing:.04em; color:var(--ink);
+           word-break:break-all; cursor:text; -webkit-user-select:text; user-select:text}
   #selBar{display:flex; align-items:center; gap:4px; margin-top:4px}
   #selBar .ibtn{width:38px; height:38px}
   #selSearch{flex:1; min-width:0; display:flex; align-items:center; gap:6px; height:38px; padding:0 14px; border-radius:19px;
@@ -325,7 +321,7 @@
           </div>
           <div id="rawBox" hidden>
             <div class="raw-cap">読み取った文字</div>
-            <div id="rawText" role="group" aria-label="読み取った文字"></div>
+            <div id="rawText" aria-label="読み取った文字"></div>
             <div id="selBar">
               <a id="selSearch" class="off" target="_blank" rel="noopener"><svg class="ic"><use href="#i-search"/></svg><span id="selLabel"></span></a>
               <button id="selClear" class="ibtn off" aria-label="選ぶのをやめる"><svg class="ic"><use href="#i-close"/></svg></button>
@@ -406,7 +402,7 @@
 <script>
 'use strict';
 
-const VERSION = '2026-11-17c';
+const VERSION = '2026-11-17d';
 
 /* ===== 外部ライブラリ =====
  * 文字の読み取り（OCR）は国立国会図書館の NDLOCR-Lite（onnxruntime-web で動かす）、
@@ -1483,74 +1479,79 @@ function renderKanjiSeg() {
 }
 
 /* ===== 読み取った文字を選んで Google で検索する =====
- * 1字ずつタップできるように並べる。1字目をタップしてから2字目をタップすると、そのあいだを選ぶ（なぞっても選べる）。
- * 選んだ1字をもう一度タップすると選ぶのをやめる。選んだ文字は、そのまま Google で検索できる。
- * Google のボタンを、字をタップした指で押してしまわないように:
- *   - ボタンの場所はいつも取っておく（選んだときにボタンが出てシートが伸びると、タップした字がずれて、
+ * iPhone のふつうの文字の選び方で選ぶ: 長押しで拡大鏡が出て語が選ばれ、始まりと終わりのつまみで範囲を変えられる
+ * （iPhone のメニューの「調べる」「Web を検索」も使える）。字を1回タップすると、その1字を選んだ状態にする。
+ * 選んだ文字は、下のボタンでそのまま Google で検索できる。
+ *   - ボタンには最後に選んだ文字を残す（ボタンに触れると iPhone が文字の選択を外すことがあるため）。× で消す
+ *   - ボタンの場所はいつも取っておく（選んだときにボタンが出てシートが伸びると、字がずれて、
  *     指を離したときのクリックがボタンに届いてしまう。シートは下の端を基準に置いているため）
- *   - ボタンは指を離して選び終えてから押せるようにし、離して 0.4 秒は押しても開かない
+ *   - 選ぶ範囲を変えている途中で押してしまわないように、選んだ文字が 0.4 秒変わらないと押しても開かない
  */
-const SEL = {
-  a: -1, b: -1,     // 選びはじめの字・選び終わりの字（どちらが前でもよい）。-1 は選んでいない
-  drag: false,      // 指で押しているあいだ
-  ready: false,     // 指を離して選び終えた（Google のボタンを押せる）
-  at: 0,            // 選び終えた時刻
-};
+const SEL = { text: '', at: 0 };   // text: 最後に選んだ文字 / at: それが変わった時刻
 const SEL_GUARD = 400;
 
 function renderRaw() {
   $('rawBox').hidden = !S.text;
-  $('rawText').innerHTML = [...S.text].map((c, i) => `<span data-i="${i}"${/\s/.test(c) ? ' class="sp"' : ''}>${esc(c)}</span>`).join('');
-  SEL.a = SEL.b = -1;
-  SEL.ready = false;
+  $('rawText').textContent = S.text;
+  SEL.text = '';
   renderSel();
 }
 
-function selText() {
-  if (SEL.a < 0) return '';
-  return [...S.text].slice(Math.min(SEL.a, SEL.b), Math.max(SEL.a, SEL.b) + 1).join('').trim();
+// 読み取った文字の中で、いま選ばれている文字（選ばれていなければ空）
+function rawSelection() {
+  const sel = window.getSelection(), box = $('rawText');
+  if (!sel || sel.isCollapsed || !sel.rangeCount) return '';
+  const r = sel.getRangeAt(0);
+  if (!box.contains(r.startContainer) || !box.contains(r.endContainer)) return '';
+  return sel.toString().replace(/\s+/g, ' ').trim();
 }
 
 function renderSel() {
-  const lo = Math.min(SEL.a, SEL.b), hi = Math.max(SEL.a, SEL.b);
-  $('rawText').querySelectorAll('span').forEach(el => {
-    const i = +el.dataset.i;
-    el.classList.toggle('sel', SEL.a >= 0 && i >= lo && i <= hi);
-  });
-  const t = selText(), on = !!t && SEL.ready;
-  $('selSearch').classList.toggle('off', !on);
+  const t = SEL.text;
+  $('selSearch').classList.toggle('off', !t);
   $('selClear').classList.toggle('off', !t);
-  $('selLabel').textContent = on ? `「${t}」を Google で検索` : t ? `「${t}」` : '文字をタップで選ぶと Google で検索';
-  if (on) $('selSearch').href = `https://www.google.com/search?q=${encodeURIComponent(t)}`;
+  $('selLabel').textContent = t ? `「${t}」を Google で検索` : '長押しかタップで選ぶと Google で検索';
+  if (t) $('selSearch').href = `https://www.google.com/search?q=${encodeURIComponent(t)}`;
   else $('selSearch').removeAttribute('href');
 }
 
-function onRawDown(e) {
-  const el = e.target.closest('#rawText span');
-  if (!el) return;
-  const i = +el.dataset.i;
-  if (SEL.a >= 0 && SEL.a === SEL.b && i !== SEL.a) SEL.b = i;   // 2字目のタップで、そのあいだを選ぶ
-  else if (SEL.a === i && SEL.b === i) SEL.a = SEL.b = -1;        // 選んだ1字をもう一度タップで、やめる
-  else SEL.a = SEL.b = i;
-  SEL.drag = SEL.a >= 0;
-  SEL.ready = false;
-  if (SEL.drag) $('rawText').setPointerCapture(e.pointerId);
-  renderSel();
-}
-function onRawMove(e) {
-  if (!SEL.drag) return;
-  const el = document.elementFromPoint(e.clientX, e.clientY)?.closest('#rawText span');
-  if (el && +el.dataset.i !== SEL.b) {
-    SEL.b = +el.dataset.i;
-    renderSel();
-  }
-}
-function onRawUp() {
-  if (!SEL.drag) return;
-  SEL.drag = false;
-  SEL.ready = true;
+function onSelectionChange() {
+  if ($('rawBox').hidden) return;
+  const t = rawSelection();
+  if (!t || t === SEL.text) return;   // 選択が外れただけのときは、最後に選んだ文字を残す
+  SEL.text = t;
   SEL.at = performance.now();
   renderSel();
+}
+
+// 字を1回タップしたら、その1字を選ぶ（長押ししなくても選びはじめられる）
+function onRawClick(e) {
+  const node = $('rawText').firstChild;
+  if (!node || rawSelection()) return;   // なぞって選んだ直後のクリックでは、選んだ範囲を変えない
+  let off = -1;
+  if (document.caretRangeFromPoint) {
+    const r = document.caretRangeFromPoint(e.clientX, e.clientY);
+    if (r?.startContainer === node) off = r.startOffset;
+  } else if (document.caretPositionFromPoint) {
+    const pos = document.caretPositionFromPoint(e.clientX, e.clientY);
+    if (pos?.offsetNode === node) off = pos.offset;
+  }
+  if (off < 0) return;
+  // 点は字の前後どちらの境目にもなるので、タップした所を含むほうの1字を選ぶ
+  for (const o of [off, off - 1]) {
+    if (o < 0 || o >= node.length || /\s/.test(node.data[o])) continue;
+    const r = document.createRange();
+    r.setStart(node, o);
+    r.setEnd(node, o + 1);
+    const b = r.getBoundingClientRect();
+    if (e.clientX >= b.left - 2 && e.clientX <= b.right + 2 && e.clientY >= b.top - 4 && e.clientY <= b.bottom + 4) {
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(r);
+      onSelectionChange();
+      return;
+    }
+  }
 }
 
 /* ===== 辞書を引く =====
@@ -2142,17 +2143,15 @@ function init() {
 
   $('sheetClose').addEventListener('click', () => closeSheet());
   $('chips').addEventListener('click', onWordClick);
-  $('rawText').addEventListener('pointerdown', onRawDown);
-  $('rawText').addEventListener('pointermove', onRawMove);
-  $('rawText').addEventListener('pointerup', onRawUp);
-  $('rawText').addEventListener('pointercancel', onRawUp);
+  $('rawText').addEventListener('click', onRawClick);
+  document.addEventListener('selectionchange', onSelectionChange);
   $('selClear').addEventListener('click', () => {
-    SEL.a = SEL.b = -1;
-    SEL.ready = false;
+    if (rawSelection()) window.getSelection().removeAllRanges();
+    SEL.text = '';
     renderSel();
   });
   $('selSearch').addEventListener('click', e => {
-    if (!SEL.ready || !selText() || performance.now() - SEL.at < SEL_GUARD) e.preventDefault();
+    if (!SEL.text || performance.now() - SEL.at < SEL_GUARD) e.preventDefault();
   });
   document.querySelectorAll('#kanjiSeg button').forEach(b => b.addEventListener('click', () => {
     SET.kanjiOnly = b.dataset.kanji === '1';
