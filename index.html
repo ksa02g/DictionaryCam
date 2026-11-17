@@ -80,7 +80,17 @@
            box-shadow:0 2px 8px rgba(0,0,0,.25)}
   .pillbtn:active{transform:scale(.96)}
   #btnDir{right:12px}
-  #btnBack{left:12px}
+  #btnBack, #btnCam{left:12px}
+  /* 使うカメラを選ぶ */
+  #camMenu{position:absolute; top:62px; left:12px; z-index:3; width:min(320px, calc(100% - 24px)); max-height:calc(100% - 140px); overflow:auto;
+           padding:6px; border-radius:16px; background:var(--card); color:var(--ink); box-shadow:0 6px 24px rgba(0,0,0,.35)}
+  #camMenu h3{padding:6px 10px 2px; font-size:13px; color:var(--sub)}
+  #camMenu button{display:block; width:100%; padding:8px 10px; border-radius:10px; text-align:left}
+  #camMenu button.on{background:var(--accent-soft)}
+  #camMenu button b{display:block; font-size:15px}
+  #camMenu button b span{margin-left:4px; font-size:12px; font-weight:400; color:var(--sub)}
+  #camMenu button small{display:block; font-size:12px; color:var(--sub); line-height:1.35}
+  #camMenu p{padding:6px 10px 4px; font-size:12px; color:var(--sub); line-height:1.45}
   #zoomBadge{position:absolute; top:20px; left:50%; transform:translateX(-50%); padding:2px 10px; border-radius:99px;
              background:rgba(0,0,0,.6); color:#fff; font-size:13px; font-weight:700; pointer-events:none;
              opacity:0; transition:opacity .25s}
@@ -256,6 +266,13 @@
 
   #debugLog{position:fixed; left:4px; right:4px; top:calc(4px + env(safe-area-inset-top)); z-index:30; max-height:38vh; overflow:auto;
             padding:6px 8px; border-radius:8px; background:rgba(0,0,0,.8); color:#a6f3a6; font:11px/1.4 ui-monospace,Menlo,monospace; white-space:pre-wrap}
+  #updateBar{position:fixed; left:50%; top:calc(8px + env(safe-area-inset-top)); z-index:25; transform:translateX(-50%);
+             display:flex; align-items:center; gap:10px; width:max-content; max-width:94vw; padding:8px 8px 8px 14px; border-radius:14px;
+             background:rgba(20,22,26,.94); color:#fff; font-size:14px; box-shadow:0 4px 16px rgba(0,0,0,.3)}
+  #updateBar button{height:34px; padding:0 12px; border-radius:17px; background:var(--accent); color:var(--accent-ink); font-weight:700; white-space:nowrap}
+  #updateBar .x{background:none; color:#fff; padding:0 6px}
+  .ver{margin-top:20px; text-align:center; font-size:12px; color:var(--faint)}
+  .ver button{margin-left:6px; color:var(--link); font-size:12px; text-decoration:underline}
   #toast{position:fixed; left:50%; bottom:calc(96px + env(safe-area-inset-bottom)); z-index:20; transform:translateX(-50%);
          max-width:86vw; padding:10px 16px; border-radius:12px; background:rgba(20,22,26,.9); color:#fff; font-size:14px; text-align:center}
 </style>
@@ -297,6 +314,8 @@
         <div id="frame"><div id="band"></div></div>
         <div id="arrow"></div>
         <button id="btnBack" class="pillbtn" hidden><svg class="ic"><use href="#i-back"/></svg>カメラ</button>
+        <button id="btnCam" class="pillbtn" hidden aria-label="使うカメラを選ぶ"><svg class="ic"><use href="#i-cam"/></svg><span id="camLabel">自動</span></button>
+        <div id="camMenu" hidden></div>
         <button id="btnDir" class="pillbtn" aria-label="縦書き・横書きの切り替え"><svg class="ic"><use href="#i-dir"/></svg><span id="dirLabel">縦書き</span></button>
         <div id="zoomBadge"></div>
         <div id="camStatus" hidden></div>
@@ -396,13 +415,14 @@
 </div>
 
 <input type="file" id="file" accept="image/*" hidden>
+<div id="updateBar" hidden><span id="updateText"></span><button id="updateBtn">更新する</button><button class="x" id="updateClose" aria-label="閉じる">×</button></div>
 <div id="toast" hidden></div>
 <div id="debugLog" hidden></div>
 
 <script>
 'use strict';
 
-const VERSION = '2026-11-17d';
+const VERSION = '2026-11-17e';
 
 /* ===== 外部ライブラリ =====
  * 文字の読み取り（OCR）は国立国会図書館の NDLOCR-Lite（onnxruntime-web で動かす）、
@@ -454,7 +474,8 @@ function save(key, value) {
 
 const DICTS = ['ja', 'en', 'wiki'];
 // dict: 使う辞書 / vert: 辞書ごとの縦書き・横書き / font: 文字サイズ 0〜3 / kanjiOnly: 撮ったあとに漢字のことばだけ出す
-const SET = Object.assign({ dict: 'ja', vert: { ja: true, en: false, wiki: true }, font: 1, kanjiOnly: false }, load('settings', {}));
+// cam: 使うカメラの名前（'' は自動。iPhone がふつうの背面カメラを選ぶ）
+const SET = Object.assign({ dict: 'ja', vert: { ja: true, en: false, wiki: true }, font: 1, kanjiOnly: false, cam: '' }, load('settings', {}));
 if (!DICTS.includes(SET.dict)) SET.dict = 'ja';
 const saveSet = () => save('settings', SET);
 
@@ -511,6 +532,63 @@ if (DEBUG) {
   }, 500);
 }
 
+/* ===== 新しい版に入れ替える =====
+ * GitHub Pages のページは端末に 10 分ほどキャッシュされ、ホーム画面のアプリは閉じて開き直しても前の版のままのことがある。
+ * 起動したとき・アプリに戻ってきたとき（1分に1回まで）に、サーバーの index.html の版（VERSION）を確かめる。
+ * 新しければ、起動したときはすぐ、使っている途中なら「更新する」を押したら入れ替える。
+ * キャッシュを入れ替えて読み込みなおしても古いままなら（CDN がまだ古いなど）、URL に ?v= を付けて読み込む。
+ */
+const UPD_KEY = `${STORE}-updating`;
+let updLast = 0;
+async function checkUpdate(how) {   // how: 'start' | 'resume' | 'manual'
+  if (how === 'resume' && Date.now() - updLast < 60000) return;
+  updLast = Date.now();
+  let v = null;
+  try {
+    const r = await fetch(`index.html?check=${Date.now()}`, { cache: 'no-store' });
+    if (r.ok) v = (await r.text()).match(/const VERSION = '([^']+)'/)?.[1] || null;
+  } catch (e) { /* 電波がないなど */ }
+  if (!v) {
+    if (how === 'manual') toast('確かめられませんでした');
+    return;
+  }
+  if (v === VERSION) {
+    if (how === 'manual') toast(`いまの版（${VERSION}）が最新です`);
+    return;
+  }
+  log(`新しい版 ${v}（いまは ${VERSION}）`);
+  if (how === 'start' && new URLSearchParams(location.search).get('v') !== v) {
+    applyUpdate(v);
+    return;
+  }
+  $('updateText').textContent = `新しい版（${v}）があります`;
+  $('updateBtn').onclick = () => applyUpdate(v);
+  $('updateBar').hidden = false;
+}
+async function applyUpdate(v) {
+  let tried = null;
+  try {
+    tried = sessionStorage.getItem(UPD_KEY);
+    sessionStorage.setItem(UPD_KEY, v);
+  } catch (e) { /* 保存できなくても続ける */ }
+  if (tried === v) {   // 一度入れ替えたのに古いまま
+    location.replace(`${location.pathname}?v=${encodeURIComponent(v)}${DEBUG ? '&debug' : ''}`);
+    return;
+  }
+  const dir = location.pathname.replace(/[^/]*$/, '');
+  await Promise.allSettled([...new Set([location.pathname + location.search, dir, `${dir}index.html`])].map(u => fetch(u, { cache: 'reload' })));
+  location.reload();
+}
+function updatedNotice() {
+  try {
+    if (sessionStorage.getItem(UPD_KEY) !== VERSION) return;
+    sessionStorage.removeItem(UPD_KEY);
+  } catch (e) {
+    return;
+  }
+  toast(`新しい版（${VERSION}）に更新しました`);
+}
+
 /* ===== 画面 ===== */
 const S = {
   view: '',
@@ -556,6 +634,8 @@ function setDict(d) {
 /* ===== カメラ =====
  * mode: 'video'（カメラ）/ 'photo'（選んだ写真）
  * view: 画面上の拡大と移動。ハードウェアのズームが使えないときと、写真のときに使う
+ * 使うカメラは選べる（SET.cam）。iPhone の自動（デュアル広角など）は近くのピントへの切り替え（マクロ）が遅いことがあるので、
+ * 超広角を選ぶと、はじめから近くにピントが合うカメラで撮れる（機種による）
  */
 const Cam = {
   mode: 'video',
@@ -566,6 +646,31 @@ const Cam = {
   hw: null,                 // ハードウェアのズーム { min, max, value }
   torch: false,
   view: { z: 1, tx: 0, ty: 0 },
+  devices: [],              // 背面のカメラ [{ id, label }]（カメラを許可したあとでないと名前がわからない）
+
+  async listDevices() {
+    try {
+      const all = await navigator.mediaDevices.enumerateDevices();
+      this.devices = all.filter(d => d.kind === 'videoinput' && !/前面|front|user/i.test(d.label)).map(d => ({ id: d.deviceId, label: d.label }));
+    } catch (e) {
+      this.devices = [];
+    }
+    return this.devices;
+  },
+
+  // 選んだカメラの deviceId。名前がまだわからないときは、いったんカメラを開いて確かめる
+  async deviceId() {
+    if (!SET.cam) return null;
+    let list = await this.listDevices();
+    if (!list.some(d => d.label)) {
+      const s0 = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' } } });
+      s0.getTracks().forEach(t => t.stop());
+      list = await this.listDevices();
+    }
+    const id = list.find(d => d.label === SET.cam)?.id || null;
+    if (!id) log(`カメラ: 「${SET.cam}」が見つからないので自動にする`);
+    return id;
+  },
 
   async start() {
     if (this.mode !== 'video' || this.stream || this.starting || this.frozen) return;
@@ -577,10 +682,19 @@ const Cam = {
     renderStatus();
     log('カメラ: 起動');
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
-      });
+      const size = { width: { ideal: 1920 }, height: { ideal: 1080 } };
+      const auto = { audio: false, video: { facingMode: { ideal: 'environment' }, ...size } };
+      const id = await this.deviceId();
+      let stream;
+      if (id) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { deviceId: { exact: id }, ...size } });
+        } catch (e) {
+          if (e.name === 'NotAllowedError') throw e;
+          log(`カメラ: 「${SET.cam}」を開けない（${e.name}）。自動にする`);
+        }
+      }
+      stream ||= await navigator.mediaDevices.getUserMedia(auto);
       log(`カメラ: 許可された（${stream.getVideoTracks()[0]?.label || '名前なし'}）`);
       // 許可を待つあいだに別の画面へ移っていたら、すぐ止める
       if (S.view !== 'scan' || document.hidden || this.mode !== 'video' || this.frozen) {
@@ -592,6 +706,8 @@ const Cam = {
       this.track = stream.getVideoTracks()[0];
       $('video').srcObject = stream;
       const caps = this.track.getCapabilities?.() || {};
+      log(`カメラ: ズーム ${caps.zoom ? `${caps.zoom.min}〜${caps.zoom.max}` : 'なし'}・ピント ${(caps.focusMode || []).join(',') || '不明'}・ライト ${caps.torch ? 'あり' : 'なし'}`);
+      this.listDevices().then(renderCamButton);
       this.hw = caps.zoom && caps.zoom.max > caps.zoom.min
         ? { min: caps.zoom.min, max: Math.min(caps.zoom.max, caps.zoom.min * 8), value: this.track.getSettings?.().zoom || caps.zoom.min }
         : null;
@@ -680,7 +796,9 @@ const Cam = {
     img.hidden = false;
     $('video').hidden = true;
     $('btnBack').hidden = false;
+    $('camMenu').hidden = true;
     this.mode = 'photo';
+    renderCamButton();
     this.view = { z: 1, tx: 0, ty: 0 };
     applyView();
     camMessage('');
@@ -694,6 +812,7 @@ const Cam = {
     $('video').hidden = false;
     $('btnBack').hidden = true;
     this.mode = 'video';
+    renderCamButton();
     this.view = { z: 1, tx: 0, ty: 0 };
     applyView();
     updateHint();
@@ -743,6 +862,49 @@ function applyView() {
   const v = Cam.view, t = `translate(${v.tx}px, ${v.ty}px) scale(${v.z})`;
   $('video').style.transform = t;
   $('still').style.transform = t;
+}
+
+/* 使うカメラを選ぶメニュー（背面のカメラが2つ以上あるときだけ出す） */
+function camName(label) {
+  if (/超広角|ultra ?wide/i.test(label)) return '超広角';
+  if (/望遠|tele/i.test(label)) return '望遠';
+  if (/トリプル|triple/i.test(label)) return 'トリプル';
+  if (/デュアル広角|dual ?wide/i.test(label)) return 'デュアル広角';
+  if (/デュアル|dual/i.test(label)) return 'デュアル';
+  if (/背面|back|rear/i.test(label)) return '広角';
+  return label;
+}
+const CAM_NOTE = {
+  '自動': 'iPhone が選ぶ（いままでと同じ）',
+  '超広角': '近くにピントが合う（マクロ）。少し近づけて撮る',
+  '広角': 'ふつうのカメラ。近すぎるとピントが合わない',
+  '望遠': '離れて大きく写す',
+  'デュアル広角': '広角と超広角を自動で切り替え',
+  'トリプル': '超広角・広角・望遠を自動で切り替え',
+  'デュアル': '広角と望遠を自動で切り替え',
+};
+function renderCamButton() {
+  const named = Cam.devices.filter(d => d.label);
+  $('btnCam').hidden = Cam.mode !== 'video' || named.length < 2;
+  $('camLabel').textContent = SET.cam ? camName(SET.cam) : '自動';
+}
+function openCamMenu() {
+  const items = [{ label: '', name: '自動' }, ...Cam.devices.filter(d => d.label).map(d => ({ label: d.label, name: camName(d.label) }))];
+  $('camMenu').innerHTML = `<h3>使うカメラ</h3>${items.map(it => `<button data-cam="${esc(it.label)}" class="${it.label === SET.cam ? 'on' : ''}">
+      <b>${esc(it.name)}${it.label && it.label !== it.name ? `<span>${esc(it.label)}</span>` : ''}</b>
+      ${CAM_NOTE[it.name] ? `<small>${esc(CAM_NOTE[it.name])}</small>` : ''}</button>`).join('')}
+    <p>本の文字になかなかピントが合わないときは「超広角」を選んで、少し近づけて撮ってください（機種によっては、超広角は近くにピントが合いません）。</p>`;
+  $('camMenu').hidden = false;
+}
+function chooseCam(label) {
+  $('camMenu').hidden = true;
+  if (label === SET.cam) return;
+  SET.cam = label;
+  saveSet();
+  renderCamButton();
+  log(`カメラ: 「${label || '自動'}」にする`);
+  Cam.stop();
+  Cam.start();
 }
 
 function camMessage(msg, retry = 'もう一度') {
@@ -1925,7 +2087,7 @@ function renderDictEmpty() {
   const recent = HIST.slice(0, 12);
   $('dBody').innerHTML = `<div class="empty"><h2>ことばを調べる</h2>
     <p>「スキャン」で本の文字を撮るか、下の欄にことばを入れてください。上で辞書を切り替えられます。</p>
-    <p class="src" style="margin-top:12px">文字の読み取り: <a href="https://github.com/ndl-lab/ndlocr-lite" target="_blank" rel="noopener">NDLOCR-Lite</a>（国立国会図書館、CC BY 4.0）。
+    <p class="src" style="margin-top:12px">カメラ辞書 版 ${VERSION}。文字の読み取り: <a href="https://github.com/ndl-lab/ndlocr-lite" target="_blank" rel="noopener">NDLOCR-Lite</a>（国立国会図書館、CC BY 4.0）。
     辞書: ウィクショナリー・Wikipedia（CC BY-SA 4.0）</p>
     ${recent.length ? `<div class="recent">${recent.map(h => `<button class="chip" data-word="${esc(h.w)}" data-r="${esc(h.r)}"><span class="r">${esc(h.r)}</span><span class="b">${esc(h.w)}</span></button>`).join('')}</div>` : ''}</div>`;
 }
@@ -2057,11 +2219,13 @@ function when(t) {
 }
 const DICT_TAG = { ja: '国語', en: '英和', wiki: 'Wiki' };
 
+const verLine = () => `<p class="ver">カメラ辞書 版 ${VERSION}<button id="verCheck">新しい版を確かめる</button></p>`;
+
 function renderHist() {
   const marks = S.histTab === 'marks', list = marks ? MARKS : HIST;
   document.querySelectorAll('#histSeg button').forEach(b => b.classList.toggle('on', b.dataset.hist === S.histTab));
   if (!list.length) {
-    $('hList').innerHTML = `<p class="empty" style="text-align:center; padding-top:24px">${marks ? '辞書の画面の しおり ボタンで、ことばをブックマークできます。' : 'まだ調べたことばはありません。'}</p>`;
+    $('hList').innerHTML = `<p class="empty" style="text-align:center; padding-top:24px">${marks ? '辞書の画面の しおり ボタンで、ことばをブックマークできます。' : 'まだ調べたことばはありません。'}</p>${verLine()}`;
     return;
   }
   $('hList').innerHTML = list.map((x, i) => `<div class="hitem">
@@ -2070,7 +2234,7 @@ function renderHist() {
         <span class="s">${esc(x.s)}</span>
       </button>
       <button class="del" data-del="${i}" aria-label="消す"><svg class="ic"><use href="#i-close"/></svg></button>
-    </div>`).join('') + (marks ? '' : '<button class="hclear" id="histClear">履歴をすべて消す</button>');
+    </div>`).join('') + (marks ? '' : '<button class="hclear" id="histClear">履歴をすべて消す</button>') + verLine();
 }
 
 function onHistClick(e) {
@@ -2085,6 +2249,8 @@ function onHistClick(e) {
     list.splice(+del.dataset.del, 1);
     save(marks ? 'marks' : 'history', list);
     renderHist();
+  } else if (e.target.closest('#verCheck')) {
+    checkUpdate('manual');
   } else if (e.target.closest('#histClear')) {
     if (!confirm('履歴をすべて消しますか？（ブックマークは残ります）')) return;
     HIST = [];
@@ -2129,6 +2295,19 @@ function init() {
     navigator.clipboard?.writeText(LOGS.join('\n')).then(() => toast('記録をコピーしました'), () => {});
   });
   $('btnBack').addEventListener('click', () => Cam.backToCamera());
+  $('btnCam').addEventListener('click', () => {
+    if ($('camMenu').hidden) openCamMenu();
+    else $('camMenu').hidden = true;
+  });
+  $('camMenu').addEventListener('click', e => {
+    const b = e.target.closest('[data-cam]');
+    if (b) chooseCam(b.dataset.cam);
+  });
+  // メニューの外を触ったら閉じる
+  document.addEventListener('pointerdown', e => {
+    if (!$('camMenu').hidden && !e.target.closest('#camMenu, #btnCam')) $('camMenu').hidden = true;
+  });
+  $('updateClose').addEventListener('click', () => { $('updateBar').hidden = true; });
   $('file').addEventListener('change', e => {
     const f = e.target.files?.[0];
     if (f) Cam.openPhoto(f);
@@ -2198,11 +2377,17 @@ function init() {
   $('hList').addEventListener('click', onHistClick);
 
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) Cam.stop();
-    else if (S.view === 'scan' && $('sheet').hidden) Cam.start();
+    if (document.hidden) {
+      Cam.stop();
+      return;
+    }
+    if (S.view === 'scan' && $('sheet').hidden) Cam.start();
+    checkUpdate('resume');
   });
 
   log(`起動 ${VERSION}${navigator.standalone ? '（ホーム画面）' : ''} ${navigator.userAgent}`);
+  updatedNotice();
+  checkUpdate('start');
   setDict(SET.dict);
   renderFont();
   renderKanjiSeg();
